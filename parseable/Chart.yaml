@@ -1,0 +1,23 @@
+apiVersion: v2
+name: parseable
+description: Helm chart for Parseable (OSS and Enterprise). Columnar data lake platform - purpose built for observability
+type: application
+version: 4.0.0
+appVersion: "v2.8.0"
+icon: "https://raw.githubusercontent.com/parseablehq/.github/main/images/logo.svg"
+home: https://www.parseable.com
+sources:
+  - https://github.com/parseablehq/parseable
+  - https://github.com/parseablehq/helm-charts
+keywords:
+  - parseable
+  - observability
+  - logs
+  - metrics
+  - traces
+  - data-lake
+
+maintainers:
+  - name: Parseable Team
+    email: hi@parseable.com
+    url: https://parseable.com

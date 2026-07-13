@@ -1,0 +1,19 @@
+# Parseable on Azure (Blob), distributed mode.
+parseable:
+  deploymentMode: distributed
+  store:
+    type: blob-store
+    secretName: parseable-env-secret
+
+  distributed:
+    ingestor:
+      replicas: 3
+      persistence:
+        staging:
+          storageClass: managed-csi
+          size: 5Gi
+    querier:
+      persistence:
+        hotTier:
+          storageClass: managed-csi
+          size: 100Gi
