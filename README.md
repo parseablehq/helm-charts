@@ -1,7 +1,6 @@
 # Parseable Helm Charts
 
-Helm charts for [Parseable](https://www.parseable.com) — a columnar data lake
-platform purpose-built for observability.
+Helm charts for [Parseable](https://www.parseable.com) — a columnar data lake platform purpose-built for observability.
 
 ## Charts
 
