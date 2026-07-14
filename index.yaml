@@ -1,0 +1,853 @@
+apiVersion: v1
+entries:
+  pai:
+  - apiVersion: v2
+    appVersion: 0.3.0
+    created: "2026-07-14T11:39:39.969396+05:30"
+    description: Parseable Auto Instrumentation (PAI) operator for Kubernetes
+    digest: 210963f69aacb386e39bebe516727a6f5d310176e4c06daca73552398278dd4c
+    home: https://github.com/parseablehq/pai
+    keywords:
+    - observability
+    - opentelemetry
+    - auto-instrumentation
+    - parseable
+    maintainers:
+    - name: Parseable
+    name: pai
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/pai-0.3.0.tgz
+    version: 0.3.0
+  - apiVersion: v2
+    appVersion: 0.2.0
+    created: "2026-07-14T11:39:39.969224+05:30"
+    description: Parseable Auto Instrumentation (PAI) operator for Kubernetes
+    digest: fd04518e8fc9e25d3fa876971a38b4c65005a207ba9440ae8ce981cd070646d9
+    home: https://github.com/parseablehq/pai
+    keywords:
+    - observability
+    - opentelemetry
+    - auto-instrumentation
+    - parseable
+    maintainers:
+    - name: Parseable
+    name: pai
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/pai-0.2.0.tgz
+    version: 0.2.0
+  - apiVersion: v2
+    appVersion: 0.1.0
+    created: "2026-07-14T11:39:39.969056+05:30"
+    description: Parseable Auto Instrumentation (PAI) operator for Kubernetes
+    digest: 9443e75bef96a424fd5063ddd02cee18e6050207d73e505f66be467287c9f7f7
+    home: https://github.com/parseablehq/pai
+    keywords:
+    - observability
+    - opentelemetry
+    - auto-instrumentation
+    - parseable
+    maintainers:
+    - name: Parseable
+    name: pai
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/pai-0.1.0.tgz
+    version: 0.1.0
+  parseable:
+  - apiVersion: v2
+    appVersion: v2.9.4
+    created: "2026-07-14T11:39:40.012191+05:30"
+    description: Helm chart for Parseable (OSS and Enterprise). Columnar data lake
+      platform - purpose built for observability
+    digest: 94c7e73afc98af2028599a0e0b4792a00bd32ee5d822a51194767bf690845bb5
+    home: https://www.parseable.com
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/logo.svg
+    keywords:
+    - parseable
+    - observability
+    - logs
+    - metrics
+    - traces
+    - data-lake
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    sources:
+    - https://github.com/parseablehq/parseable
+    - https://github.com/parseablehq/helm-charts
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-3.0.0.tgz
+    version: 3.0.0
+  - apiVersion: v2
+    appVersion: v2.9.3
+    created: "2026-07-14T11:39:40.011761+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable OSS version. Columnar data lake platform
+      - purpose built for observability
+    digest: 4ce9f09da9d666add5702336c8f7a6ede9060ffa05640b8722b7cf3888476117
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.9.3.tgz
+    version: 2.9.3
+  - apiVersion: v2
+    appVersion: v2.8.0
+    created: "2026-07-14T11:39:40.010063+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable OSS version. Columnar data lake platform
+      - purpose built for observability
+    digest: 3d949bf2b5942020e62617a6db2523819f713dd541d11efa9276df417516288a
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.8.3.tgz
+    version: 2.8.3
+  - apiVersion: v2
+    appVersion: v2.8.0
+    created: "2026-07-14T11:39:40.007753+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable OSS version. Columnar data lake platform
+      - purpose built for observability
+    digest: 341c7b13072557693dcdd6f02206f057b371254c16fd593f9679890612bd0e83
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.8.2.tgz
+    version: 2.8.2
+  - apiVersion: v2
+    appVersion: v2.8.1
+    created: "2026-07-14T11:39:40.006129+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable OSS version. Columnar data lake platform
+      - purpose built for observability
+    digest: bb6e433061a3f93a9ecdf117bfb92b2e420d5c818e37d5a353f2f6a836da6f64
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.8.1.tgz
+    version: 2.8.1
+  - apiVersion: v2
+    appVersion: v2.8.0
+    created: "2026-07-14T11:39:40.004432+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Parseable Helm chart - Predictive, unified observability — faster
+      resolution, fewer escalations, happier customers.
+    digest: 8ef2f064df9d0fc1ac376aacbdaf462c6674f7fc7c04f574af1eb22b33285ae0
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.8.0.tgz
+    version: 2.8.0
+  - apiVersion: v2
+    appVersion: v2.7.2
+    created: "2026-07-14T11:39:40.002444+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Parseable Helm chart - Predictive, unified observability — faster
+      resolution, fewer escalations, happier customers.
+    digest: 088e065317c79a2880e805a40dc9e09d331fa0a1542d705ac1ade7fffe088ac4
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.7.2.tgz
+    version: 2.7.2
+  - apiVersion: v2
+    appVersion: v2.7.1
+    created: "2026-07-14T11:39:40.000596+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Parseable Helm chart - Predictive, unified observability — faster
+      resolution, fewer escalations, happier customers.
+    digest: b11a2cb02b10906e1df2c0435b831921644894831da9a1737077ccc6a2a78a98
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.7.1.tgz
+    version: 2.7.1
+  - apiVersion: v2
+    appVersion: v2.6.6
+    created: "2026-07-14T11:39:39.998427+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Parseable Helm chart - Predictive, unified observability — faster
+      resolution, fewer escalations, happier customers.
+    digest: a609d812d2ac359c36a6fe8c2b87e9c61edc5636d9d97b9f8d93ff5624d2ae23
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.6.6.tgz
+    version: 2.6.6
+  - apiVersion: v2
+    appVersion: v2.6.5
+    created: "2026-07-14T11:39:39.99674+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Parseable Helm chart - Predictive, unified observability — faster
+      resolution, fewer escalations, happier customers.
+    digest: b279fdbc71e8b7d31e2f0d35932a9d566941cbe11f88b06e1332e0fbe5e437bd
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.6.5.tgz
+    version: 2.6.5
+  - apiVersion: v2
+    appVersion: v2.5.13
+    created: "2026-07-14T11:39:39.985357+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Parseable Helm chart - Predictive, unified observability — faster
+      resolution, fewer escalations, happier customers.
+    digest: 004ba08d9a601ca35bc80bc406c864d7327db0a505fea4f09be773ec26f13aec
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.5.13.tgz
+    version: 2.5.13
+  - apiVersion: v2
+    appVersion: v2.5.7
+    created: "2026-07-14T11:39:39.994812+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Parseable Helm chart - Predictive, unified observability — faster
+      resolution, fewer escalations, happier customers.
+    digest: 7904bde9c786b093343968488c628380446397853e443f1f4e244259941e08eb
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.5.7.tgz
+    version: 2.5.7
+  - apiVersion: v2
+    appVersion: v2.5.6
+    created: "2026-07-14T11:39:39.993117+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Parseable Helm chart - Predictive, unified observability — faster
+      resolution, fewer escalations, happier customers.
+    digest: 25b6b75bc0757fdb9d3942b255eabf920c7c51a4ead05be7561c9bbcea74ae4a
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.5.6.tgz
+    version: 2.5.6
+  - apiVersion: v2
+    appVersion: v2.5.5
+    created: "2026-07-14T11:39:39.991383+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Parseable Helm chart - Predictive, unified observability — faster
+      resolution, fewer escalations, happier customers.
+    digest: e4a6c55cc828e35b87c95cd35d0440c00cbb5005113900dc7d47248ed2d66a61
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.5.5.tgz
+    version: 2.5.5
+  - apiVersion: v2
+    appVersion: v2.5.4
+    created: "2026-07-14T11:39:39.989333+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable - Fast Observability on S3
+    digest: bb232b7550d4e740a46c20d1574eb9fbcc73a2107351a4d1d09eab46cd140cae
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.5.4.tgz
+    version: 2.5.4
+  - apiVersion: v2
+    appVersion: v2.5.3
+    created: "2026-07-14T11:39:39.987634+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable - Fast Observability on S3
+    digest: 48e18be39ca515c19b103661d645ed2b6a7cf0144aae87fad0ad65cb46304970
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.5.3.tgz
+    version: 2.5.3
+  - apiVersion: v2
+    appVersion: v2.4.0
+    created: "2026-07-14T11:39:39.983669+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable - Fast Observability on S3
+    digest: 1dc2ad3d03e17f1a36212994a35bf7eb33cea2bb553b03ba85cc18a97416f5a5
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.4.0.tgz
+    version: 2.4.0
+  - apiVersion: v2
+    appVersion: v2.3.3
+    created: "2026-07-14T11:39:39.981778+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable - Fast Observability on S3
+    digest: 4e578f3dd299efffb646acbe630d1bd87433333d355369c96e8f8dd4c188e8f5
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.3.3.tgz
+    version: 2.3.3
+  - apiVersion: v2
+    appVersion: v2.3.2
+    created: "2026-07-14T11:39:39.979746+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable - Fast Observability on S3
+    digest: 7db1763910367c287bd64e6c695f6572f10a1e23d4c7e51b17c8d7ca9d218e74
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.3.2.tgz
+    version: 2.3.2
+  - apiVersion: v2
+    appVersion: v2.3.1
+    created: "2026-07-14T11:39:39.977807+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable - Fast Observability on S3
+    digest: aff6953c6add4fadb1147e2596a1090f3c7036a1b6bea8bd9d13cd10bcf88c01
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.3.1.tgz
+    version: 2.3.1
+  - apiVersion: v2
+    appVersion: v2.3.0
+    created: "2026-07-14T11:39:39.975459+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable - Fast Observability on S3
+    digest: e8b136b9edea3a82ff2ac100ba07a7fb563702b8bebfd7b228b650b63d2157c6
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.3.0.tgz
+    version: 2.3.0
+  - apiVersion: v2
+    appVersion: v2.1.0
+    created: "2026-07-14T11:39:39.973586+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable - Fast Observability on S3
+    digest: 1478079bcb48aacf0b0818c05a9e26b627d085350f50fc9909ca04ae9a13a337
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.1.0.tgz
+    version: 2.1.0
+  - apiVersion: v2
+    appVersion: v1.7.5
+    created: "2026-07-14T11:39:39.971296+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable Server
+    digest: 65a45289e4b1152ae435f9915ac5a21fe6da43d51500c7389b4deb38fc0024dd
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-2.0.0.tgz
+    version: 2.0.0
+  parseable-enterprise:
+  - apiVersion: v2
+    appVersion: v2.9.3
+    created: "2026-07-14T11:39:40.028026+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable Enterprise version - Needs a license to
+      run. Please contact sales@parseable.com for more details.
+    digest: b3ab3a7ac16665c2eb2beac7f5b7452e74340034eb34ccb1ecf4741350b7a3be
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable-enterprise
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-enterprise-2.9.3.tgz
+    version: 2.9.3
+  - apiVersion: v2
+    appVersion: v2.8.0
+    created: "2026-07-14T11:39:40.025837+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable Enterprise version - Needs a license to
+      run. Please contact sales@parseable.com for more details.
+    digest: f3eda4c6f8ebbdc247f3a100f3d63ce4c208eec32a140883110736b7ba68ec86
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable-enterprise
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-enterprise-2.8.3.tgz
+    version: 2.8.3
+  - apiVersion: v2
+    appVersion: v2.8.0
+    created: "2026-06-11T00:45:13.339133+08:00"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable Enterprise version - Needs a license to
+      run. Please contact sales@parseable.com for more details.
+    digest: 116c1c16481a1751d3babc6c1c62d91a571f5ba7f545d5599e37b1141a79f990
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable-enterprise
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-enterprise-2.8.1.tgz
+    version: 2.8.1
+  - apiVersion: v2
+    appVersion: v2.8.0
+    created: "2026-07-14T11:39:40.024032+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable Enterprise version - Needs a license to
+      run. Please contact sales@parseable.com for more details.
+    digest: 3d22ca3d869b257ddf42ee239abf2d1c8b029ab2715233e7401e56d7b5a85002
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable-enterprise
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-enterprise-2.8.0.tgz
+    version: 2.8.0
+  - apiVersion: v2
+    appVersion: v2.7.3
+    created: "2026-07-14T11:39:40.021925+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable Enterprise version - Needs a license to
+      run. Please contact sales@parseable.com for more details.
+    digest: 8cc36a35779d4e8128ddc54ed76a7143a99b40e67984347daa239f7cebb75495
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable-enterprise
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-enterprise-2.7.3.tgz
+    version: 2.7.3
+  - apiVersion: v2
+    appVersion: v2.7.2
+    created: "2026-07-14T11:39:40.020153+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable Enterprise version - Needs a license to
+      run. Please contact sales@parseable.com for more details.
+    digest: 7712a90b5bd68a9d67d2493a7d57bc73378b9c8358ea617a290206d444b7f77c
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable-enterprise
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-enterprise-2.7.2.tgz
+    version: 2.7.2
+  - apiVersion: v2
+    appVersion: v2.7.1
+    created: "2026-07-14T11:39:40.018095+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable Enterprise version - Needs a license to
+      run. Please contact sales@parseable.com for more details.
+    digest: 4a921a302215f8262114fc1bf7a192b9b4c85bb593c37cb3eac8df00fddc415f
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable-enterprise
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-enterprise-2.7.1.tgz
+    version: 2.7.1
+  - apiVersion: v2
+    appVersion: v2.6.6
+    created: "2026-07-14T11:39:40.016074+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable Enterprise version - Needs a license to
+      run. Please contact sales@parseable.com for more details.
+    digest: 066610c7a442b86c8dfb04b20a2430255b90c9306a33dd37d203449959ee8e03
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable-enterprise
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-enterprise-2.6.7.tgz
+    version: 2.6.7
+  - apiVersion: v2
+    appVersion: v2.6.6
+    created: "2026-07-14T11:39:40.014322+05:30"
+    dependencies:
+    - condition: vector.enabled
+      name: vector
+      repository: https://helm.vector.dev
+      version: 0.20.1
+    - condition: fluent-bit.enabled
+      name: fluent-bit
+      repository: https://fluent.github.io/helm-charts
+      version: 0.48.0
+    description: Helm chart for Parseable Enterprise version - Needs a license to
+      run. Please contact sales@parseable.com for more details.
+    digest: 4f38bb1aa4dcfd29ba88580c7269eaed099cc0cf773603516b0afc2157a07620
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/new-logo.svg
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable-enterprise
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-enterprise-2.6.6.tgz
+    version: 2.6.6
+generated: "2026-07-14T11:39:39.968826+05:30"
