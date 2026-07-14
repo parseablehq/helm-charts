@@ -1,5 +1,13 @@
 # Parseable Helm Chart
 
+```sh
+helm repo add parseable https://charts.parseable.com
+helm repo update
+
+helm pull parseable/parseable --untar
+cd parseable
+```
+
 `values.yaml` holds the defaults. Layer an overlay from `overlays/` with `-f` to
 pick a topology / store, and stack `overlays/enterprise.yaml` for Enterprise.
 
