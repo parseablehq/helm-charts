@@ -87,10 +87,10 @@ parseable:
       secretKey: key.json
       mountPath: /var/secrets/google
 
-  ## Optional shared secret to authenticate intra-cluster requests between
-  ## nodes. When enabled, P_CLUSTER_SECRET is injected into every distributed
-  ## node from this secret; leave disabled to authenticate with admin
-  ## credentials only. Not used in standalone mode.
+  ## Shared secret used to authenticate intra-cluster requests between nodes.
+  ## Required for Enterprise distributed deployments, optional for OSS
+  ## distributed deployments, and not used in standalone mode. When enabled,
+  ## P_CLUSTER_SECRET is injected into every distributed node from this secret.
   ##   kubectl create secret generic parseable-cluster-secret \
   ##     --from-literal=cluster-secret=<16-char-alphanumeric-string>
   clusterSecret:

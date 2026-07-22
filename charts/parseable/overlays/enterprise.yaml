@@ -5,6 +5,8 @@
 # parseable_license.json and parseable_license.sig.
 parseable:
   deploymentMode: distributed
+  clusterSecret:
+    enabled: true
   enterprise:
     enabled: true
     image:

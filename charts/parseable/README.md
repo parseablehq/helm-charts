@@ -90,6 +90,9 @@ kubectl -n parseable create secret generic parseable-license \
   --from-file=parseable_license.json=<path>/parseable_license.json \
   --from-file=parseable_license.sig=<path>/parseable_license.sig
 
+kubectl -n parseable create secret generic parseable-cluster-secret \
+  --from-literal=cluster-secret="$(openssl rand -hex 8)"
+
 helm install parseable ./ -n parseable \
   -f overlays/aws.yaml -f overlays/enterprise.yaml
 ```
