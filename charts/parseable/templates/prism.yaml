@@ -1,4 +1,7 @@
 {{- if and (eq .Values.parseable.deploymentMode "distributed") .Values.parseable.enterprise.enabled }}
+{{- if not .Values.parseable.clusterSecret.enabled }}
+{{- fail "Enterprise deployments require parseable.clusterSecret.enabled=true and a pre-existing cluster Secret" }}
+{{- end }}
 {{- $p := .Values.parseable }}
 {{- $ent := $p.enterprise }}
 {{- $node := $p.distributed.prism }}
