@@ -2,8 +2,26 @@ apiVersion: v1
 entries:
   pai:
   - apiVersion: v2
+    appVersion: v0.1.0
+    created: "2026-07-30T20:22:43.495404+05:30"
+    description: Parseable Auto Instrumentation (PAI) operator for Kubernetes
+    digest: f1cd8892ad8fc05419643e6b0a79af949f028d77f3c3ad527c8aa70fb31400a2
+    home: https://github.com/parseablehq/pai
+    keywords:
+    - observability
+    - opentelemetry
+    - auto-instrumentation
+    - parseable
+    maintainers:
+    - name: Parseable
+    name: pai
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/pai-0.4.0.tgz
+    version: 0.4.0
+  - apiVersion: v2
     appVersion: 0.3.0
-    created: "2026-07-14T14:27:05.055283+05:30"
+    created: "2026-07-30T20:22:43.494502+05:30"
     description: Parseable Auto Instrumentation (PAI) operator for Kubernetes
     digest: 8e99e9a6f9825fa98679d56ec9c07ffa875e9ab04bae7c5f74609e37853129a0
     home: https://github.com/parseablehq/pai
@@ -21,7 +39,7 @@ entries:
     version: 0.3.0
   - apiVersion: v2
     appVersion: 0.2.0
-    created: "2026-07-14T14:27:05.055123+05:30"
+    created: "2026-07-30T20:22:43.494069+05:30"
     description: Parseable Auto Instrumentation (PAI) operator for Kubernetes
     digest: fd04518e8fc9e25d3fa876971a38b4c65005a207ba9440ae8ce981cd070646d9
     home: https://github.com/parseablehq/pai
@@ -39,7 +57,7 @@ entries:
     version: 0.2.0
   - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-07-14T14:27:05.054979+05:30"
+    created: "2026-07-30T20:22:43.49369+05:30"
     description: Parseable Auto Instrumentation (PAI) operator for Kubernetes
     digest: 9443e75bef96a424fd5063ddd02cee18e6050207d73e505f66be467287c9f7f7
     home: https://github.com/parseablehq/pai
@@ -58,7 +76,7 @@ entries:
   parseable:
   - apiVersion: v2
     appVersion: v2.9.4
-    created: "2026-07-14T14:27:05.065792+05:30"
+    created: "2026-07-30T20:22:43.510227+05:30"
     description: Helm chart for Parseable (OSS and Enterprise). Columnar data lake
       platform - purpose built for observability
     digest: 892ed3b5bdb953b485869005a22f154c712bf607234dff8b1b13f76333c9a57b
@@ -85,7 +103,7 @@ entries:
     version: 3.0.0
   - apiVersion: v2
     appVersion: v2.9.3
-    created: "2026-07-14T14:27:05.06538+05:30"
+    created: "2026-07-30T20:22:43.509481+05:30"
     dependencies:
     - condition: vector.enabled
       name: vector
@@ -110,7 +128,7 @@ entries:
     version: 2.9.3
   - apiVersion: v2
     appVersion: v2.8.0
-    created: "2026-07-14T14:27:05.06366+05:30"
+    created: "2026-07-30T20:22:43.506804+05:30"
     dependencies:
     - condition: vector.enabled
       name: vector
@@ -135,7 +153,7 @@ entries:
     version: 2.8.3
   - apiVersion: v2
     appVersion: v2.8.0
-    created: "2026-07-14T14:27:05.060973+05:30"
+    created: "2026-07-30T20:22:43.504119+05:30"
     dependencies:
     - condition: vector.enabled
       name: vector
@@ -160,7 +178,7 @@ entries:
     version: 2.8.2
   - apiVersion: v2
     appVersion: v2.8.1
-    created: "2026-07-14T14:27:05.059312+05:30"
+    created: "2026-07-30T20:22:43.501341+05:30"
     dependencies:
     - condition: vector.enabled
       name: vector
@@ -185,7 +203,7 @@ entries:
     version: 2.8.1
   - apiVersion: v2
     appVersion: v2.8.0
-    created: "2026-07-14T14:27:05.057027+05:30"
+    created: "2026-07-30T20:22:43.498402+05:30"
     dependencies:
     - condition: vector.enabled
       name: vector
@@ -211,7 +229,7 @@ entries:
   parseable-enterprise:
   - apiVersion: v2
     appVersion: v2.9.3
-    created: "2026-07-14T14:27:05.069775+05:30"
+    created: "2026-07-30T20:22:43.515518+05:30"
     dependencies:
     - condition: vector.enabled
       name: vector
@@ -236,7 +254,7 @@ entries:
     version: 2.9.3
   - apiVersion: v2
     appVersion: v2.8.0
-    created: "2026-07-14T14:27:05.068+05:30"
+    created: "2026-07-30T20:22:43.512687+05:30"
     dependencies:
     - condition: vector.enabled
       name: vector
@@ -259,4 +277,4 @@ entries:
     urls:
     - https://charts.parseable.com/helm-releases/parseable-enterprise-2.8.3.tgz
     version: 2.8.3
-generated: "2026-07-14T14:27:05.054758+05:30"
+generated: "2026-07-30T20:22:43.492874+05:30"
