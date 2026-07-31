@@ -59,12 +59,17 @@ parseable:
     ##     --from-literal=username=admin \
     ##     --from-literal=password=admin
     ##
-    ## s3-store (adds):
+    ## s3-store with static credentials (adds):
     ##     --from-literal=s3.url=<endpoint> \
     ##     --from-literal=s3.access.key=<key> \
     ##     --from-literal=s3.secret.key=<secret> \
     ##     --from-literal=s3.bucket=<bucket> \
     ##     --from-literal=s3.region=<region>
+    ##
+    ## AWS IRSA:
+    ##   Omit s3.access.key and s3.secret.key from this Secret. Annotate the
+    ##   Parseable service account with its IAM role under serviceAccount.annotations.
+    ##   The remaining S3 settings (url, bucket, and region) are still required.
     ##
     ## blob-store (adds):
     ##     --from-literal=azr.access_key=<key> \
@@ -146,6 +151,9 @@ parseable:
   serviceAccount:
     create: true
     name: "parseable"
+    ## For AWS IRSA, for example:
+    ## annotations:
+    ##   eks.amazonaws.com/role-arn: arn:aws:iam::<account-id>:role/<role-name>
     annotations: {}
 
   securityContext:
