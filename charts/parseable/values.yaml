@@ -173,7 +173,7 @@ parseable:
 
   ## --- standalone --- (deploymentMode: standalone, OSS only) ---------------
   standalone:
-    ## Single pod running every function (ingest + query + storage).
+    ## Single StatefulSet pod running every function (ingest + query + storage).
     unified:
       env:
         RUST_LOG: warn
@@ -281,8 +281,8 @@ parseable:
       service:
         type: ClusterIP
         port: 80
-      ## Local disk used as the hot-tier query cache, mounted at /parseable/hot-tier.
-      ## Required for Enterprise query nodes; recommended for OSS performance.
+      ## Local disk used as the Enterprise hot-tier query cache, mounted at
+      ## /parseable/hot-tier. Ignored for OSS deployments.
       persistence:
         hotTier:
           enabled: true

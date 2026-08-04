@@ -33,6 +33,22 @@ kubectl -n parseable create secret generic parseable-env-secret \
 helm install parseable ./ -n parseable -f overlays/standalone.yaml
 ```
 
+### Upgrading an existing standalone Deployment
+
+Older chart releases ran the standalone pod as a Deployment. Before upgrading
+such a release to the StatefulSet-based chart, scale the old Deployment down so
+its ReadWriteOnce volumes can detach cleanly. The existing standalone PVCs keep
+their names and are reused by the StatefulSet.
+
+```sh
+kubectl scale deployment parseable-standalone --replicas=0 -n parseable
+kubectl wait --for=delete pod \
+  -l app.kubernetes.io/instance=parseable,app.parseable.com/type=standalone \
+  -n parseable --timeout=5m
+
+helm upgrade --install parseable ./ -n parseable -f your-values.yaml
+```
+
 ## Distributed (querier + ingestors)
 
 Create the namespace, then the object-store secret for your cloud (below).

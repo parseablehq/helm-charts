@@ -125,7 +125,7 @@ spec:
       volumes:
         - name: stage-volume
           emptyDir: {}
-        {{- if not $hotTier.enabled }}
+        {{- if and $ent.enabled (not $hotTier.enabled) }}
         - name: hot-tier-volume
           emptyDir: {}
         {{- end }}
@@ -155,10 +155,12 @@ spec:
               value: "query"
             - name: P_STAGING_DIR
               value: "/parseable/staging"
+            {{- if $ent.enabled }}
             - name: P_HOT_TIER_DIR
               value: "/parseable/hot-tier"
             - name: P_MAX_DISK_USAGE_PERCENT
               value: "95.0"
+            {{- end }}
             - name: P_QUERIER_ENDPOINT
               value: "$(HOSTNAME).{{ $fullname }}-querier-headless.{{ .Release.Namespace }}.svc.cluster.local:8000"
             {{- if $p.clusterSecret.enabled }}
@@ -240,8 +242,10 @@ spec:
           volumeMounts:
             - name: stage-volume
               mountPath: "/parseable/staging"
+            {{- if $ent.enabled }}
             - name: hot-tier-volume
               mountPath: "/parseable/hot-tier"
+            {{- end }}
             {{- if $gcs }}
             - name: gcs-credentials
               mountPath: {{ $store.gcsCredentials.mountPath }}
@@ -252,7 +256,7 @@ spec:
               mountPath: {{ $ent.license.mountPath }}
               readOnly: true
             {{- end }}
-  {{- if $hotTier.enabled }}
+  {{- if and $ent.enabled $hotTier.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: hot-tier-volume
