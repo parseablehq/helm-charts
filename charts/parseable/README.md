@@ -33,7 +33,40 @@ kubectl -n parseable create secret generic parseable-env-secret \
 helm install parseable ./ -n parseable -f overlays/standalone.yaml
 ```
 
+### Upgrading an existing standalone Deployment
+
+Older chart releases ran the standalone pod as a Deployment. Before upgrading
+such a release to the StatefulSet-based chart, scale the old Deployment down so
+its ReadWriteOnce volumes can detach cleanly. The existing standalone PVCs keep
+their names and are reused by the StatefulSet.
+
+```sh
+kubectl scale deployment parseable-standalone --replicas=0 -n parseable
+kubectl wait --for=delete pod \
+  -l app.kubernetes.io/instance=parseable,app.parseable.com/type=standalone \
+  -n parseable --timeout=5m
+
+helm upgrade --install parseable ./ -n parseable -f your-values.yaml
+```
+
 ## Distributed (querier + ingestors)
+
+### Upgrading an existing distributed installation
+
+This release changes the querier storage configuration. Kubernetes does not
+allow in-place updates to StatefulSet volume claim templates, so recreate the
+querier StatefulSet before upgrading. Existing PVCs are retained, but the
+querier is briefly unavailable while its pod is recreated.
+
+```sh
+kubectl delete statefulset parseable-querier \
+  -n parseable --cascade=orphan
+kubectl delete pod \
+  -l app.kubernetes.io/instance=parseable,app.parseable.com/type=querier \
+  -n parseable
+
+helm upgrade --install parseable ./ -n parseable -f <helm-values>.yaml
+```
 
 Create the namespace, then the object-store secret for your cloud (below).
 

@@ -8,8 +8,28 @@
 {{- $secret := $store.secretName }}
 {{- $gcs := and (eq $store.type "gcs-store") $store.gcsCredentials }}
 {{- $image := printf "%s:%s" $p.image.repository ($p.image.tag | default .Chart.AppVersion) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "parseable.fullname" . }}-standalone-headless
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+    app.parseable.com/type: standalone
+spec:
+  clusterIP: None
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+      name: parseable-port
+  selector:
+    app.kubernetes.io/name: {{ include "parseable.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.parseable.com/type: standalone
+---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: {{ include "parseable.fullname" . }}-standalone
   namespace: {{ .Release.Namespace }}
@@ -17,7 +37,11 @@ metadata:
     {{- include "parseable.labels" . | nindent 4 }}
     app.parseable.com/type: standalone
 spec:
+  serviceName: {{ include "parseable.fullname" . }}-standalone-headless
   replicas: 1
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "parseable.name" . }}
