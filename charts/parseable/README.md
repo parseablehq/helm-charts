@@ -51,23 +51,6 @@ helm upgrade --install parseable ./ -n parseable -f your-values.yaml
 
 ## Distributed (querier + ingestors)
 
-### Upgrading an existing distributed installation
-
-This release changes the querier storage configuration. Kubernetes does not
-allow in-place updates to StatefulSet volume claim templates, so recreate the
-querier StatefulSet before upgrading. Existing PVCs are retained, but the
-querier is briefly unavailable while its pod is recreated.
-
-```sh
-kubectl delete statefulset parseable-querier \
-  -n parseable --cascade=orphan
-kubectl delete pod \
-  -l app.kubernetes.io/instance=parseable,app.parseable.com/type=querier \
-  -n parseable
-
-helm upgrade --install parseable ./ -n parseable -f <helm-values>.yaml
-```
-
 Create the namespace, then the object-store secret for your cloud (below).
 
 ```sh
