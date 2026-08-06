@@ -18,7 +18,8 @@
 {{- end }}
 {{- if and .Release.IsUpgrade $existingStandalone }}
 {{- $existingVCTs := dig "spec" "volumeClaimTemplates" (list) $existingStandalone }}
-{{- if eq (len $existingVCTs) 0 }}
+{{- $storageModel := dig "metadata" "annotations" "app.parseable.com/storage-model" "" $existingStandalone }}
+{{- if and (eq (len $existingVCTs) 0) (ne $storageModel "vct-v1") }}
 {{- fail "standalone now uses volumeClaimTemplates; direct upgrade from a StatefulSet without VCTs is not supported. Install a new release and migrate data before cutover" }}
 {{- end }}
 {{- end }}
@@ -47,6 +48,8 @@ kind: StatefulSet
 metadata:
   name: {{ include "parseable.fullname" . }}-standalone
   namespace: {{ .Release.Namespace }}
+  annotations:
+    app.parseable.com/storage-model: vct-v1
   labels:
     {{- include "parseable.labels" . | nindent 4 }}
     app.parseable.com/type: standalone
@@ -162,11 +165,21 @@ spec:
               mountPath: {{ $store.gcsCredentials.mountPath }}
               readOnly: true
             {{- end }}
-      {{- if $gcs }}
+      {{- if or $gcs (not $node.persistence.staging.enabled) (and $local (not $node.persistence.data.enabled)) }}
       volumes:
+        {{- if not $node.persistence.staging.enabled }}
+        - name: stage-volume
+          emptyDir: {}
+        {{- end }}
+        {{- if and $local (not $node.persistence.data.enabled) }}
+        - name: data-volume
+          emptyDir: {}
+        {{- end }}
+        {{- if $gcs }}
         - name: gcs-credentials
           secret:
             secretName: {{ $store.gcsCredentials.secretName }}
+        {{- end }}
       {{- end }}
       {{- with $node.nodeSelector }}
       nodeSelector:
@@ -180,7 +193,9 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+  {{- if or $node.persistence.staging.enabled (and $local $node.persistence.data.enabled) }}
   volumeClaimTemplates:
+    {{- if $node.persistence.staging.enabled }}
     - metadata:
         name: stage-volume
       spec:
@@ -190,7 +205,8 @@ spec:
         resources:
           requests:
             storage: {{ $node.persistence.staging.size | quote }}
-    {{- if $local }}
+    {{- end }}
+    {{- if and $local $node.persistence.data.enabled }}
     - metadata:
         name: data-volume
       spec:
@@ -201,6 +217,7 @@ spec:
           requests:
             storage: {{ $node.persistence.data.size | quote }}
     {{- end }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: Service

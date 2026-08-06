@@ -10,10 +10,12 @@ parseable:
       persistence:
         # local-store keeps ingested data on this volume, so persist it
         data:
+          enabled: true
           storageClass: ""
           accessMode: ReadWriteOnce
           size: 10Gi
         staging:
+          enabled: true
           storageClass: ""
           accessMode: ReadWriteOnce
           size: 5Gi

@@ -22,9 +22,10 @@ overlays/
 
 ## Standalone (single pod, local-store)
 
-Standalone staging is always persistent. The chart creates and mounts a
-dedicated staging PVC; it cannot be replaced with an ephemeral `emptyDir`.
-With `local-store`, the chart also creates and mounts a mandatory data PVC.
+For standalone, `standalone.unified.persistence.staging.enabled=true` creates a
+staging PVC; setting it to `false` uses `emptyDir`.
+With `local-store`, `standalone.unified.persistence.data.enabled=true` creates
+a data PVC; setting it to `false` uses `emptyDir` for the data directory.
 With S3, GCS, or Azure Blob storage, no `/parseable/data` volume is created.
 
 ```sh
@@ -48,8 +49,15 @@ move traffic.
 ## Distributed (querier + ingestors)
 
 Create the namespace, then the object-store secret for your cloud (below).
-Each ingestor always receives its own staging PVC through the StatefulSet's
-`volumeClaimTemplates`.
+With `distributed.ingestor.persistence.staging.enabled=true`, each ingestor
+receives its own staging PVC; `false` uses `emptyDir`.
+Distributed mode does not support `local-store`; use S3, GCS, or Azure Blob
+Storage.
+
+For Enterprise, `distributed.querier.persistence.hotTier.enabled=true` creates
+one hot-tier PVC per querier; `false` uses `emptyDir`. These storage switches
+are install-time choices. Changing either switch later requires recreating the
+affected StatefulSet because its `volumeClaimTemplates` are immutable.
 
 ```sh
 kubectl create namespace parseable

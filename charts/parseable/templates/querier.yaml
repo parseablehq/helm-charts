@@ -125,6 +125,10 @@ spec:
       volumes:
         - name: stage-volume
           emptyDir: {}
+        {{- if and $ent.enabled (not $hotTier.enabled) }}
+        - name: hot-tier-volume
+          emptyDir: {}
+        {{- end }}
         {{- if $gcs }}
         - name: gcs-credentials
           secret:
@@ -252,7 +256,7 @@ spec:
               mountPath: {{ $ent.license.mountPath }}
               readOnly: true
             {{- end }}
-  {{- if $ent.enabled }}
+  {{- if and $ent.enabled $hotTier.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: hot-tier-volume

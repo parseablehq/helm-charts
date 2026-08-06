@@ -3,6 +3,9 @@
 {{- $ent := $p.enterprise }}
 {{- $node := $p.distributed.ingestor }}
 {{- $store := $p.store }}
+{{- if eq $store.type "local-store" }}
+{{- fail "deploymentMode=distributed does not support store.type=local-store; use s3-store, gcs-store, or blob-store" }}
+{{- end }}
 {{- $secret := $store.secretName }}
 {{- $gcs := eq $store.type "gcs-store" }}
 {{- $image := $ent.enabled | ternary (printf "%s:%s" $ent.image.repository ($ent.image.tag | default .Chart.AppVersion)) (printf "%s:%s" $p.image.repository ($p.image.tag | default .Chart.AppVersion)) }}
@@ -121,6 +124,10 @@ spec:
               done
               echo "{{ $waitFor }} did not become ready in time."; exit 1
       volumes:
+        {{- if not $node.persistence.staging.enabled }}
+        - name: stage-volume
+          emptyDir: {}
+        {{- end }}
         {{- if $gcs }}
         - name: gcs-credentials
           secret:
@@ -238,6 +245,7 @@ spec:
               mountPath: {{ $ent.license.mountPath }}
               readOnly: true
             {{- end }}
+  {{- if $node.persistence.staging.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: stage-volume
@@ -248,4 +256,5 @@ spec:
         resources:
           requests:
             storage: {{ $node.persistence.staging.size | quote }}
+  {{- end }}
 {{- end }}
