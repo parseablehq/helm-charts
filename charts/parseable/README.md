@@ -43,9 +43,9 @@ helm install parseable ./ -n parseable -f overlays/standalone.yaml
 
 ### Upgrading an existing standalone installation
 
-Standalone now uses StatefulSet `volumeClaimTemplates`. Do not upgrade an
-existing fixed-PVC or `emptyDir` installation directly. Install a new release,
-migrate the required data, verify it, and then move traffic.
+New installations are not affected. If standalone Parseable was installed with
+chart 3.0.2 or earlier, do not upgrade it directly to chart 3.1.0. Create a
+separate installation, migrate and verify the data, and then move traffic.
 
 ## Distributed (querier + ingestors)
 
