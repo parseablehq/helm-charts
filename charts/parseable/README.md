@@ -26,6 +26,8 @@ For standalone, `standalone.unified.persistence.staging.enabled=true` creates a
 staging PVC; setting it to `false` uses `emptyDir`.
 With `local-store`, `standalone.unified.persistence.data.enabled=true` creates
 a data PVC; setting it to `false` uses `emptyDir` for the data directory.
+When local-store data is disabled, staging persistence must also be disabled;
+persisted staging metadata cannot be paired safely with ephemeral local data.
 With S3, GCS, or Azure Blob storage, no `/parseable/data` volume is created.
 
 ```sh

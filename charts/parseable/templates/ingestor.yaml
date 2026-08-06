@@ -117,7 +117,7 @@ spec:
             - |
               echo "Waiting for {{ $waitFor }} at /api/v1/readiness..."
               for i in $(seq 1 60); do
-                if curl -sf http://{{ $fullname }}-{{ $waitFor }}-service.{{ .Release.Namespace }}/api/v1/readiness; then
+                if curl -sf --connect-timeout 2 --max-time 5 http://{{ $fullname }}-{{ $waitFor }}-service.{{ .Release.Namespace }}/api/v1/readiness; then
                   echo "{{ $waitFor }} is ready!"; exit 0
                 fi
                 echo "Not ready yet, retrying in 2s..."; sleep 2

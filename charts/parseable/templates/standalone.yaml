@@ -8,6 +8,9 @@
 {{- $secret := $store.secretName }}
 {{- $gcs := and (eq $store.type "gcs-store") $store.gcsCredentials }}
 {{- $local := eq $store.type "local-store" }}
+{{- if and $local $node.persistence.staging.enabled (not $node.persistence.data.enabled) }}
+{{- fail "standalone local-store does not support persistence.staging.enabled=true when persistence.data.enabled=false; disable staging persistence as well or enable data persistence" }}
+{{- end }}
 {{- $image := printf "%s:%s" $p.image.repository ($p.image.tag | default .Chart.AppVersion) }}
 {{- $fullname := include "parseable.fullname" . }}
 {{- $existingStandalone := lookup "apps/v1" "StatefulSet" .Release.Namespace (printf "%s-standalone" $fullname) }}
