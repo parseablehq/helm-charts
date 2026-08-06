@@ -22,6 +22,11 @@ overlays/
 
 ## Standalone (single pod, local-store)
 
+Standalone staging is always persistent. The chart creates and mounts a
+dedicated staging PVC; it cannot be replaced with an ephemeral `emptyDir`.
+With `local-store`, the chart also creates and mounts a mandatory data PVC.
+With S3, GCS, or Azure Blob storage, no `/parseable/data` volume is created.
+
 ```sh
 kubectl create namespace parseable
 
@@ -33,25 +38,18 @@ kubectl -n parseable create secret generic parseable-env-secret \
 helm install parseable ./ -n parseable -f overlays/standalone.yaml
 ```
 
-### Upgrading an existing standalone Deployment
+### Upgrading an existing standalone installation
 
-Older chart releases ran the standalone pod as a Deployment. Before upgrading
-such a release to the StatefulSet-based chart, scale the old Deployment down so
-its ReadWriteOnce volumes can detach cleanly. The existing standalone PVCs keep
-their names and are reused by the StatefulSet.
-
-```sh
-kubectl scale deployment parseable-standalone --replicas=0 -n parseable
-kubectl wait --for=delete pod \
-  -l app.kubernetes.io/instance=parseable,app.parseable.com/type=standalone \
-  -n parseable --timeout=5m
-
-helm upgrade --install parseable ./ -n parseable -f your-values.yaml
-```
+Standalone now uses StatefulSet `volumeClaimTemplates`. Direct upgrades from
+older fixed-PVC or `emptyDir` releases are blocked before Helm changes any
+resources. Install a new release, migrate the required data, verify it, and then
+move traffic.
 
 ## Distributed (querier + ingestors)
 
 Create the namespace, then the object-store secret for your cloud (below).
+Each ingestor always receives its own staging PVC through the StatefulSet's
+`volumeClaimTemplates`.
 
 ```sh
 kubectl create namespace parseable

@@ -121,10 +121,6 @@ spec:
               done
               echo "{{ $waitFor }} did not become ready in time."; exit 1
       volumes:
-        {{- if not $node.persistence.staging.enabled }}
-        - name: stage-volume
-          emptyDir: {}
-        {{- end }}
         {{- if $gcs }}
         - name: gcs-credentials
           secret:
@@ -242,7 +238,6 @@ spec:
               mountPath: {{ $ent.license.mountPath }}
               readOnly: true
             {{- end }}
-  {{- if $node.persistence.staging.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: stage-volume
@@ -253,5 +248,4 @@ spec:
         resources:
           requests:
             storage: {{ $node.persistence.staging.size | quote }}
-  {{- end }}
 {{- end }}

@@ -189,14 +189,14 @@ parseable:
         type: ClusterIP
         port: 80
       persistence:
-        ## Data directory - only needed when store.type is local-store.
+        ## Persistent data directory. A PVC is created only for local-store;
+        ## object-store modes do not mount /parseable/data.
         data:
-          enabled: false
           storageClass: ""
           accessMode: ReadWriteOnce
           size: 5Gi
+        ## Staging is required and always backed by a PVC.
         staging:
-          enabled: true
           storageClass: ""
           accessMode: ReadWriteOnce
           size: 5Gi
@@ -241,10 +241,10 @@ parseable:
       service:
         type: ClusterIP
         port: 80
-      ## Local disk for staging incoming events before they are sent to the object store.
+      ## Persistent local disk for staging incoming events before they are sent
+      ## to the object store. A PVC is always created for each ingestor.
       persistence:
         staging:
-          enabled: true
           storageClass: ""
           accessMode: ReadWriteOnce
           size: 5Gi
@@ -285,7 +285,6 @@ parseable:
       ## /parseable/hot-tier. Ignored for OSS deployments.
       persistence:
         hotTier:
-          enabled: true
           storageClass: ""
           accessMode: ReadWriteOnce
           size: 5Gi
