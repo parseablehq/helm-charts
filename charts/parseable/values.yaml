@@ -189,12 +189,16 @@ parseable:
         type: ClusterIP
         port: 80
       persistence:
-        ## Data directory - only needed when store.type is local-store.
+        ## Data directory used only by local-store. When enabled, it is backed
+        ## by a PVC; when disabled, it uses emptyDir. Object-store modes do not
+        ## create or mount a data volume regardless of this value.
         data:
-          enabled: false
+          enabled: true
           storageClass: ""
           accessMode: ReadWriteOnce
           size: 5Gi
+        ## Staging directory. When enabled, it is backed by a PVC; when
+        ## disabled, it uses emptyDir.
         staging:
           enabled: true
           storageClass: ""
@@ -241,7 +245,9 @@ parseable:
       service:
         type: ClusterIP
         port: 80
-      ## Local disk for staging incoming events before they are sent to the object store.
+      ## Local disk for staging incoming events before they are sent to the
+      ## object store. When enabled, each ingestor gets a PVC; when disabled,
+      ## each ingestor uses emptyDir.
       persistence:
         staging:
           enabled: true
@@ -282,13 +288,14 @@ parseable:
         type: ClusterIP
         port: 80
       ## Local disk used as the Enterprise hot-tier query cache, mounted at
-      ## /parseable/hot-tier. Ignored for OSS deployments.
+      ## /parseable/hot-tier. When enabled, each Enterprise querier gets a PVC;
+      ## when disabled, it uses emptyDir. Ignored for OSS deployments.
       persistence:
         hotTier:
           enabled: true
           storageClass: ""
           accessMode: ReadWriteOnce
-          size: 5Gi
+          size: 50Gi
       podAnnotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "80"

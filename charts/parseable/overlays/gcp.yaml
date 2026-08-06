@@ -14,10 +14,12 @@ parseable:
       replicas: 3
       persistence:
         staging:
+          enabled: true
           storageClass: standard-rwo
           size: 5Gi
     querier:
       persistence:
         hotTier:
+          enabled: true
           storageClass: standard-rwo
-          size: 100Gi
+          size: 50Gi
