@@ -43,10 +43,9 @@ helm install parseable ./ -n parseable -f overlays/standalone.yaml
 
 ### Upgrading an existing standalone installation
 
-Standalone now uses StatefulSet `volumeClaimTemplates`. Direct upgrades from
-older fixed-PVC or `emptyDir` releases are blocked before Helm changes any
-resources. Install a new release, migrate the required data, verify it, and then
-move traffic.
+Standalone now uses StatefulSet `volumeClaimTemplates`. Do not upgrade an
+existing fixed-PVC or `emptyDir` installation directly. Install a new release,
+migrate the required data, verify it, and then move traffic.
 
 ## Distributed (querier + ingestors)
 
