@@ -12,20 +12,6 @@
 {{- fail "standalone local-store does not support persistence.staging.enabled=true when persistence.data.enabled=false; disable staging persistence as well or enable data persistence" }}
 {{- end }}
 {{- $image := printf "%s:%s" $p.image.repository ($p.image.tag | default .Chart.AppVersion) }}
-{{- $fullname := include "parseable.fullname" . }}
-{{- $existingStandalone := lookup "apps/v1" "StatefulSet" .Release.Namespace (printf "%s-standalone" $fullname) }}
-{{- $legacyStagingPVC := lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "%s-standalone-staging" $fullname) }}
-{{- $legacyDataPVC := lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "%s-standalone-data" $fullname) }}
-{{- if and .Release.IsUpgrade (or $legacyStagingPVC $legacyDataPVC) }}
-{{- fail "standalone now uses volumeClaimTemplates; direct upgrade from legacy fixed PVCs is not supported. Install a new release and migrate data before cutover" }}
-{{- end }}
-{{- if and .Release.IsUpgrade $existingStandalone }}
-{{- $existingVCTs := dig "spec" "volumeClaimTemplates" (list) $existingStandalone }}
-{{- $storageModel := dig "metadata" "annotations" "app.parseable.com/storage-model" "" $existingStandalone }}
-{{- if and (eq (len $existingVCTs) 0) (ne $storageModel "vct-v1") }}
-{{- fail "standalone now uses volumeClaimTemplates; direct upgrade from a StatefulSet without VCTs is not supported. Install a new release and migrate data before cutover" }}
-{{- end }}
-{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -51,8 +37,6 @@ kind: StatefulSet
 metadata:
   name: {{ include "parseable.fullname" . }}-standalone
   namespace: {{ .Release.Namespace }}
-  annotations:
-    app.parseable.com/storage-model: vct-v1
   labels:
     {{- include "parseable.labels" . | nindent 4 }}
     app.parseable.com/type: standalone
