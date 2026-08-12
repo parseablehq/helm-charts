@@ -136,6 +136,8 @@ spec:
               value: "prism"
             - name: P_STAGING_DIR
               value: "/parseable/staging"
+            - name: P_PROMQL_RESULTS_CACHE_DIR
+              value: "/parseable/promql-cache"
             {{- if $p.clusterSecret.enabled }}
             - name: P_CLUSTER_SECRET
               valueFrom:
@@ -214,7 +216,7 @@ spec:
             - name: stage-volume
               mountPath: "/parseable/staging"
             - name: promql-cache
-              mountPath: "/parseable/promql"
+              mountPath: "/parseable/promql-cache"
             {{- if $gcs }}
             - name: gcs-credentials
               mountPath: {{ $store.gcsCredentials.mountPath }}

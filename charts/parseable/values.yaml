@@ -338,8 +338,9 @@ parseable:
         storageClass: ""
         accessMode: ReadWriteOnce
         size: 5Gi
-      ## Separate volume for Prism's PromQL cache, mounted at /parseable/promql.
-      ## When disabled the mount falls back to an emptyDir on the pod.
+      ## Separate volume for Prism's PromQL results cache, mounted at
+      ## /parseable/promql-cache (matches P_PROMQL_RESULTS_CACHE_DIR, which the
+      ## chart sets automatically). Falls back to an emptyDir when disabled.
       cache:
         enabled: false
         storageClass: ""
