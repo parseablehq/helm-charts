@@ -3,6 +3,9 @@
 {{- $ent := $p.enterprise }}
 {{- $node := $p.distributed.ingestor }}
 {{- $store := $p.store }}
+{{- if eq $store.type "local-store" }}
+{{- fail "deploymentMode=distributed does not support store.type=local-store; use s3-store, gcs-store, or blob-store" }}
+{{- end }}
 {{- $secret := $store.secretName }}
 {{- $gcs := eq $store.type "gcs-store" }}
 {{- $image := $ent.enabled | ternary (printf "%s:%s" $ent.image.repository ($ent.image.tag | default .Chart.AppVersion)) (printf "%s:%s" $p.image.repository ($p.image.tag | default .Chart.AppVersion)) }}
@@ -114,7 +117,7 @@ spec:
             - |
               echo "Waiting for {{ $waitFor }} at /api/v1/readiness..."
               for i in $(seq 1 60); do
-                if curl -sf http://{{ $fullname }}-{{ $waitFor }}-service.{{ .Release.Namespace }}/api/v1/readiness; then
+                if curl -sf --connect-timeout 2 --max-time 5 http://{{ $fullname }}-{{ $waitFor }}-service.{{ .Release.Namespace }}/api/v1/readiness; then
                   echo "{{ $waitFor }} is ready!"; exit 0
                 fi
                 echo "Not ready yet, retrying in 2s..."; sleep 2

@@ -10,10 +10,12 @@ parseable:
       replicas: 3
       persistence:
         staging:
+          enabled: true
           storageClass: managed-csi
           size: 5Gi
     querier:
       persistence:
         hotTier:
+          enabled: true
           storageClass: managed-csi
-          size: 100Gi
+          size: 50Gi

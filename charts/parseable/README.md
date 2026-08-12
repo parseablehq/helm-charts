@@ -22,6 +22,14 @@ overlays/
 
 ## Standalone (single pod, local-store)
 
+For standalone, `standalone.unified.persistence.staging.enabled=true` creates a
+staging PVC; setting it to `false` uses `emptyDir`.
+With `local-store`, `standalone.unified.persistence.data.enabled=true` creates
+a data PVC; setting it to `false` uses `emptyDir` for the data directory.
+When local-store data is disabled, staging persistence must also be disabled;
+persisted staging metadata cannot be paired safely with ephemeral local data.
+With S3, GCS, or Azure Blob storage, no `/parseable/data` volume is created.
+
 ```sh
 kubectl create namespace parseable
 
@@ -33,25 +41,24 @@ kubectl -n parseable create secret generic parseable-env-secret \
 helm install parseable ./ -n parseable -f overlays/standalone.yaml
 ```
 
-### Upgrading an existing standalone Deployment
+### Upgrading an existing standalone installation
 
-Older chart releases ran the standalone pod as a Deployment. Before upgrading
-such a release to the StatefulSet-based chart, scale the old Deployment down so
-its ReadWriteOnce volumes can detach cleanly. The existing standalone PVCs keep
-their names and are reused by the StatefulSet.
-
-```sh
-kubectl scale deployment parseable-standalone --replicas=0 -n parseable
-kubectl wait --for=delete pod \
-  -l app.kubernetes.io/instance=parseable,app.parseable.com/type=standalone \
-  -n parseable --timeout=5m
-
-helm upgrade --install parseable ./ -n parseable -f your-values.yaml
-```
+New installations are not affected. If standalone Parseable was installed with
+chart 3.0.2 or earlier, do not upgrade it directly to chart 3.1.0. Create a
+separate installation, migrate and verify the data, and then move traffic.
 
 ## Distributed (querier + ingestors)
 
 Create the namespace, then the object-store secret for your cloud (below).
+With `distributed.ingestor.persistence.staging.enabled=true`, each ingestor
+receives its own staging PVC; `false` uses `emptyDir`.
+Distributed mode does not support `local-store`; use S3, GCS, or Azure Blob
+Storage.
+
+For Enterprise, `distributed.querier.persistence.hotTier.enabled=true` creates
+one hot-tier PVC per querier; `false` uses `emptyDir`. These storage switches
+are install-time choices. Changing either switch later requires recreating the
+affected StatefulSet because its `volumeClaimTemplates` are immutable.
 
 ```sh
 kubectl create namespace parseable
