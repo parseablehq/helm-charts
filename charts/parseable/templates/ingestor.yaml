@@ -107,10 +107,14 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with $node.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       # ingestors register against the {{ $waitFor }}, so wait for it to be ready first
       initContainers:
         - name: wait-for-{{ $waitFor }}
-          image: curlimages/curl:latest
+          image: docker.io/curlimages/curl:latest
           command:
             - /bin/sh
             - -c

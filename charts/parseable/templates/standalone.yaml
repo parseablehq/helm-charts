@@ -180,6 +180,10 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with $node.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
   {{- if or $node.persistence.staging.enabled (and $local $node.persistence.data.enabled) }}
   volumeClaimTemplates:
     {{- if $node.persistence.staging.enabled }}
