@@ -99,9 +99,17 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with $node.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         {{- if not $node.persistence.enabled }}
         - name: stage-volume
+          emptyDir: {}
+        {{- end }}
+        {{- if not $node.cache.enabled }}
+        - name: promql-cache
           emptyDir: {}
         {{- end }}
         {{- if $gcs }}
@@ -205,6 +213,8 @@ spec:
           volumeMounts:
             - name: stage-volume
               mountPath: "/parseable/staging"
+            - name: promql-cache
+              mountPath: "/parseable/promql"
             {{- if $gcs }}
             - name: gcs-credentials
               mountPath: {{ $store.gcsCredentials.mountPath }}
@@ -213,8 +223,9 @@ spec:
             - name: license
               mountPath: {{ $ent.license.mountPath }}
               readOnly: true
-  {{- if $node.persistence.enabled }}
+  {{- if or $node.persistence.enabled $node.cache.enabled }}
   volumeClaimTemplates:
+    {{- if $node.persistence.enabled }}
     - metadata:
         name: stage-volume
       spec:
@@ -224,5 +235,17 @@ spec:
         resources:
           requests:
             storage: {{ $node.persistence.size | quote }}
+    {{- end }}
+    {{- if $node.cache.enabled }}
+    - metadata:
+        name: promql-cache
+      spec:
+        accessModes:
+          - {{ $node.cache.accessMode | quote }}
+        storageClassName: {{ $node.cache.storageClass | quote }}
+        resources:
+          requests:
+            storage: {{ $node.cache.size | quote }}
+    {{- end }}
   {{- end }}
 {{- end }}

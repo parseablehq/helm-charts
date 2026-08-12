@@ -214,6 +214,7 @@ parseable:
       nodeSelector: {}
       tolerations: []
       affinity: {}
+      topologySpreadConstraints: []
       terminationGracePeriodSeconds: 30
       readinessProbe:
         httpGet:
@@ -264,6 +265,7 @@ parseable:
       nodeSelector: {}
       tolerations: []
       affinity: {}
+      topologySpreadConstraints: []
       terminationGracePeriodSeconds: 30
       readinessProbe:
         httpGet:
@@ -306,6 +308,7 @@ parseable:
       nodeSelector: {}
       tolerations: []
       affinity: {}
+      topologySpreadConstraints: []
       terminationGracePeriodSeconds: 30
       readinessProbe:
         httpGet:
@@ -335,6 +338,13 @@ parseable:
         storageClass: ""
         accessMode: ReadWriteOnce
         size: 5Gi
+      ## Separate volume for Prism's PromQL cache, mounted at /parseable/promql.
+      ## When disabled the mount falls back to an emptyDir on the pod.
+      cache:
+        enabled: false
+        storageClass: ""
+        accessMode: ReadWriteOnce
+        size: 5Gi
       podAnnotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "80"
@@ -345,6 +355,7 @@ parseable:
       nodeSelector: {}
       tolerations: []
       affinity: {}
+      topologySpreadConstraints: []
       terminationGracePeriodSeconds: 30
       readinessProbe:
         httpGet:

@@ -104,6 +104,10 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with $node.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- if $ent.enabled }}
       # Enterprise: the querier registers with prism, so wait for it first
       initContainers:
