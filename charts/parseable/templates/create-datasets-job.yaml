@@ -53,7 +53,7 @@ spec:
             defaultMode: 0755
       containers:
         - name: create-datasets
-          image: curlimages/curl:latest
+          image: docker.io/curlimages/curl:latest
           command: [ "/bin/sh", "/scripts/create-datasets.sh" ]
           env:
             - name: P_USERNAME
