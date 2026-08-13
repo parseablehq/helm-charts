@@ -121,16 +121,31 @@ parseable:
     imagePullSecrets: []
 
     ## License is validated at startup; the server refuses to start without one.
-    ## Mounted read-only at `license.mountPath` on every node; the Enterprise
-    ## binary reads the license files from that directory.
+    ## The license DATA is always mounted read-only from `secretName` at
+    ## `mountPath` on every node (P_LICENSE_DATA_FILE_PATH).
     ##   kubectl create secret generic parseable-license \
     ##     --from-file=parseable_license.json=resources/parseable_license.json \
     ##     --from-file=parseable_license.sig=resources/parseable_license.sig
+    ##
+    ## The license SIGNATURE can be supplied one of two ways:
+    ##   source: file   - mounted from `secretName` (P_LICENSE_SIGNATURE_FILE_PATH)
+    ##   source: base64 - base64 string from an existing secret via secretKeyRef
+    ##                    (P_LICENSE_SIGNATURE_BASE64), e.g.
+    ##     kubectl create secret generic parseable-env-secret \
+    ##       --from-literal=license.signature.base64=$(base64 -w0 resources/parseable_license.sig)
     license:
       secretName: parseable-license
       mountPath: /tmp/license
       dataKey: parseable_license.json
-      signatureKey: parseable_license.sig
+      signature:
+        source: file # file | base64
+        ## file mode: key/filename inside `secretName`, mounted at `mountPath`.
+        key: parseable_license.sig
+        ## base64 mode only: existing secret holding the base64-encoded signature.
+        ## Ignored when source is file; uncomment and set when source is base64.
+        base64: {}
+          # secretName: parseable-env-secret
+          # key: license.signature.base64
 
     ## Ships an audit trail of API activity to another Parseable instance/stream.
     ## Applied to every node type (ingestor/querier/prism).

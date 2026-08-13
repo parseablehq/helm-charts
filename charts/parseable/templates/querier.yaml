@@ -216,8 +216,16 @@ spec:
             {{- if $ent.enabled }}
             - name: P_LICENSE_DATA_FILE_PATH
               value: "{{ $ent.license.mountPath }}/{{ $ent.license.dataKey }}"
+            {{- if eq $ent.license.signature.source "base64" }}
+            - name: P_LICENSE_SIGNATURE_BASE64
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $ent.license.signature.base64.secretName }}
+                  key: {{ $ent.license.signature.base64.key }}
+            {{- else }}
             - name: P_LICENSE_SIGNATURE_FILE_PATH
-              value: "{{ $ent.license.mountPath }}/{{ $ent.license.signatureKey }}"
+              value: "{{ $ent.license.mountPath }}/{{ $ent.license.signature.key }}"
+            {{- end }}
             {{- if $ent.auditLogging.enabled }}
             - name: P_AUDIT_LOGGER
               value: {{ $ent.auditLogging.server | quote }}
