@@ -75,6 +75,33 @@ entries:
     version: 0.1.0
   parseable:
   - apiVersion: v2
+    appVersion: v3.2.3
+    created: "2026-10-01T11:27:23.367691+05:30"
+    description: Helm chart for Parseable (OSS and Enterprise). Columnar data lake
+      platform - purpose built for observability
+    digest: f63dc5f3c21234b00fe5d8ddddce289639b9035faf1e914c84bd87a2e8697d20
+    home: https://www.parseable.com
+    icon: https://raw.githubusercontent.com/parseablehq/.github/main/images/logo.svg
+    keywords:
+    - parseable
+    - observability
+    - logs
+    - metrics
+    - traces
+    - data-lake
+    maintainers:
+    - email: hi@parseable.com
+      name: Parseable Team
+      url: https://parseable.com
+    name: parseable
+    sources:
+    - https://github.com/parseablehq/parseable
+    - https://github.com/parseablehq/helm-charts
+    type: application
+    urls:
+    - https://charts.parseable.com/helm-releases/parseable-3.2.5.tgz
+    version: 3.2.5
+  - apiVersion: v2
     appVersion: v3.2.0
     created: "2026-09-07T00:19:44.085852+05:30"
     description: Helm chart for Parseable (OSS and Enterprise). Columnar data lake
@@ -466,4 +493,4 @@ entries:
     urls:
     - https://charts.parseable.com/helm-releases/parseable-enterprise-2.8.3.tgz
     version: 2.8.3
-generated: "2026-09-07T00:19:44.064587+05:30"
+generated: "2026-10-01T11:27:23.344247+05:30"
