@@ -246,27 +246,27 @@ spec:
   {{- if or $staging.enabled $node.cache.enabled }}
   volumeClaimTemplates:
     {{- if $staging.enabled }}
-    {{- $stagingAccessMode := $staging.accessMode }}
-    {{- $stagingStorageClass := $staging.storageClass }}
-    {{- $stagingSize := $staging.size }}
-    {{- if $legacyStaging }}
-    {{- $stagingAccessMode = $stagingAccessMode | default "ReadWriteOnce" }}
-    {{- $stagingStorageClass = $stagingStorageClass | default "" }}
-    {{- $stagingSize = $stagingSize | default "5Gi" }}
-    {{- else }}
-    {{- $stagingAccessMode = required "Prism staging accessMode is required when enabled=true" $stagingAccessMode }}
-    {{- $stagingStorageClass = required "Prism staging storageClass is required when enabled=true" $stagingStorageClass }}
-    {{- $stagingSize = required "Prism staging size is required when enabled=true" $stagingSize }}
-    {{- end }}
     - metadata:
         name: stage-volume
       spec:
         accessModes:
-          - {{ $stagingAccessMode | quote }}
-        storageClassName: {{ $stagingStorageClass | quote }}
+          {{- if $legacyStaging }}
+          - {{ $node.persistence.accessMode | default "ReadWriteOnce" | quote }}
+          {{- else }}
+          - {{ required "Prism staging accessMode is required when enabled=true" $staging.accessMode | quote }}
+          {{- end }}
+        {{- if $legacyStaging }}
+        storageClassName: {{ $node.persistence.storageClass | default "" | quote }}
+        {{- else }}
+        storageClassName: {{ required "Prism staging storageClass is required when enabled=true" $staging.storageClass | quote }}
+        {{- end }}
         resources:
           requests:
-            storage: {{ $stagingSize | quote }}
+            {{- if $legacyStaging }}
+            storage: {{ $node.persistence.size | default "5Gi" | quote }}
+            {{- else }}
+            storage: {{ required "Prism staging size is required when enabled=true" $staging.size | quote }}
+            {{- end }}
     {{- end }}
     {{- if $node.cache.enabled }}
     - metadata:
