@@ -127,8 +127,15 @@ spec:
               echo "Prism did not become ready in time."; exit 1
       {{- end }}
       volumes:
+        {{- if not $node.persistence.staging.enabled }}
         - name: stage-volume
+          {{- if $node.persistence.staging.emptyDirSizeLimit }}
+          emptyDir:
+            sizeLimit: {{ $node.persistence.staging.emptyDirSizeLimit | quote }}
+          {{- else }}
           emptyDir: {}
+          {{- end }}
+        {{- end }}
         {{- if and $ent.enabled (not $hotTier.enabled) }}
         - name: hot-tier-volume
           emptyDir: {}
@@ -268,8 +275,20 @@ spec:
               mountPath: {{ $ent.license.mountPath }}
               readOnly: true
             {{- end }}
-  {{- if and $ent.enabled $hotTier.enabled }}
+  {{- if or $node.persistence.staging.enabled (and $ent.enabled $hotTier.enabled) }}
   volumeClaimTemplates:
+    {{- if $node.persistence.staging.enabled }}
+    - metadata:
+        name: stage-volume
+      spec:
+        accessModes:
+          - {{ required "Querier staging accessMode is required when enabled=true" $node.persistence.staging.accessMode | quote }}
+        storageClassName: {{ required "Querier staging storageClass is required when enabled=true" $node.persistence.staging.storageClass | quote }}
+        resources:
+          requests:
+            storage: {{ required "Querier staging size is required when enabled=true" $node.persistence.staging.size | quote }}
+    {{- end }}
+    {{- if and $ent.enabled $hotTier.enabled }}
     - metadata:
         name: hot-tier-volume
       spec:
@@ -279,5 +298,6 @@ spec:
         resources:
           requests:
             storage: {{ $hotTier.size | quote }}
+    {{- end }}
   {{- end }}
 {{- end }}

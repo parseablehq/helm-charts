@@ -304,10 +304,16 @@ parseable:
       service:
         type: ClusterIP
         port: 80
-      ## Local disk used as the Enterprise hot-tier query cache, mounted at
-      ## /parseable/hot-tier. When enabled, each Enterprise querier gets a PVC;
-      ## when disabled, it uses emptyDir. Ignored for OSS deployments.
       persistence:
+        ## Querier staging uses a PVC when enabled, otherwise emptyDir.
+        ## If enabled=true, set storageClass, accessMode, and size explicitly.
+        ## emptyDirSizeLimit applies only when enabled is false.
+        staging:
+          enabled: false
+          emptyDirSizeLimit: ""
+        ## Local disk used as the Enterprise hot-tier query cache, mounted at
+        ## /parseable/hot-tier. When enabled, each Enterprise querier gets a PVC;
+        ## when disabled, it uses emptyDir. Ignored for OSS deployments.
         hotTier:
           enabled: true
           storageClass: ""
@@ -347,12 +353,13 @@ parseable:
       service:
         type: ClusterIP
         port: 80
-      ## Local disk for Prism's own state. Optional.
+      ## Local disk for Prism staging. Use a PVC when enabled, otherwise emptyDir.
       persistence:
-        enabled: false
-        storageClass: ""
-        accessMode: ReadWriteOnce
-        size: 5Gi
+        staging:
+          enabled: false
+          ## If enabled=true, set storageClass, accessMode, and size explicitly.
+          ## Applies only when enabled is false. Leave empty for no limit.
+          emptyDirSizeLimit: ""
       ## Separate volume for Prism's PromQL results cache, mounted at
       ## /parseable/promql-cache (matches P_PROMQL_RESULTS_CACHE_DIR, which the
       ## chart sets automatically). Falls back to an emptyDir when disabled.

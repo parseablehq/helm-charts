@@ -5,6 +5,11 @@
 {{- $p := .Values.parseable }}
 {{- $ent := $p.enterprise }}
 {{- $node := $p.distributed.prism }}
+{{- $staging := $node.persistence.staging }}
+{{- $legacyStaging := hasKey $node.persistence "enabled" }}
+{{- if $legacyStaging }}
+{{- $staging = $node.persistence }}
+{{- end }}
 {{- $store := $p.store }}
 {{- $secret := $store.secretName }}
 {{- $gcs := eq $store.type "gcs-store" }}
@@ -104,9 +109,14 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       volumes:
-        {{- if not $node.persistence.enabled }}
+        {{- if not $staging.enabled }}
         - name: stage-volume
+          {{- if $staging.emptyDirSizeLimit }}
+          emptyDir:
+            sizeLimit: {{ $staging.emptyDirSizeLimit | quote }}
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         {{- end }}
         {{- if not $node.cache.enabled }}
         - name: promql-cache
@@ -233,18 +243,30 @@ spec:
             - name: license
               mountPath: {{ $ent.license.mountPath }}
               readOnly: true
-  {{- if or $node.persistence.enabled $node.cache.enabled }}
+  {{- if or $staging.enabled $node.cache.enabled }}
   volumeClaimTemplates:
-    {{- if $node.persistence.enabled }}
+    {{- if $staging.enabled }}
+    {{- $stagingAccessMode := $staging.accessMode }}
+    {{- $stagingStorageClass := $staging.storageClass }}
+    {{- $stagingSize := $staging.size }}
+    {{- if $legacyStaging }}
+    {{- $stagingAccessMode = $stagingAccessMode | default "ReadWriteOnce" }}
+    {{- $stagingStorageClass = $stagingStorageClass | default "" }}
+    {{- $stagingSize = $stagingSize | default "5Gi" }}
+    {{- else }}
+    {{- $stagingAccessMode = required "Prism staging accessMode is required when enabled=true" $stagingAccessMode }}
+    {{- $stagingStorageClass = required "Prism staging storageClass is required when enabled=true" $stagingStorageClass }}
+    {{- $stagingSize = required "Prism staging size is required when enabled=true" $stagingSize }}
+    {{- end }}
     - metadata:
         name: stage-volume
       spec:
         accessModes:
-          - {{ $node.persistence.accessMode | quote }}
-        storageClassName: {{ $node.persistence.storageClass | quote }}
+          - {{ $stagingAccessMode | quote }}
+        storageClassName: {{ $stagingStorageClass | quote }}
         resources:
           requests:
-            storage: {{ $node.persistence.size | quote }}
+            storage: {{ $stagingSize | quote }}
     {{- end }}
     {{- if $node.cache.enabled }}
     - metadata:

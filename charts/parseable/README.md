@@ -64,6 +64,16 @@ affected StatefulSet because its `volumeClaimTemplates` are immutable.
 kubectl create namespace parseable
 ```
 
+Querier staging uses `emptyDir` when
+`distributed.querier.persistence.staging.enabled=false`; set
+`distributed.querier.persistence.staging.emptyDirSizeLimit` to cap it.
+Set `enabled=true` to create a staging PVC; then supply `storageClass`,
+`accessMode`, and `size` (for example `standard`, `ReadWriteOnce`, and
+`50Gi`). Prism staging uses the same options at
+`distributed.prism.persistence.staging`. Both emptyDir limits default to
+empty, so no explicit size cap is added. The previous flat Prism
+`persistence` keys remain supported for existing values files.
+
 ### AWS (S3)
 
 ```sh
