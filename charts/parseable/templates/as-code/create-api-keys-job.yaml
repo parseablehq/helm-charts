@@ -1,0 +1,316 @@
+{{- $p := .Values.parseable }}
+{{- if hasKey $p "apikeys" }}
+  {{- fail "parseable.apikeys is not supported; use parseable.apiKeys (capital K)" }}
+{{- end }}
+{{- if hasKey $p "apiKeys" }}
+{{- if and (hasKey $p "roles") $p.apiKeys }}
+  {{- include "parseable.validateRoleReferences" (dict "kind" "apiKeys" "items" $p.apiKeys "roles" $p.roles) }}
+{{- end }}
+{{- $seen := dict }}
+{{- $seenValues := dict }}
+{{- range $key := $p.apiKeys }}
+  {{- if hasKey $seen $key.name }}
+    {{- fail (printf "apiKeys: duplicate name %q" $key.name) }}
+  {{- end }}
+  {{- $_ := set $seen $key.name true }}
+  {{- $secret := lookup "v1" "Secret" $.Release.Namespace $key.secretKeyRef.name }}
+  {{- if not $secret }}
+    {{- fail (printf "apiKeys name=%s: Secret %s not found in namespace %s; create it before Helm upgrade (offline rendering cannot use lookup)" $key.name $key.secretKeyRef.name $.Release.Namespace) }}
+  {{- end }}
+  {{- $data := default (dict) (get $secret "data") }}
+  {{- $encoded := get $data $key.secretKeyRef.key }}
+  {{- if not $encoded }}
+    {{- fail (printf "apiKeys name=%s: Secret %s has no %s field or it is empty" $key.name $key.secretKeyRef.name $key.secretKeyRef.key) }}
+  {{- end }}
+  {{- $value := b64dec $encoded }}
+  {{- if or (ne (len $value) 36) (not (regexMatch "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" $value)) }}
+    {{- fail (printf "apiKeys name=%s: Secret %s field %s must contain a UUID v4 in 8-4-4-4-12 format (no spaces or newline)" $key.name $key.secretKeyRef.name $key.secretKeyRef.key) }}
+  {{- end }}
+  {{- if hasKey $seenValues $value }}
+    {{- fail (printf "apiKeys name=%s: Secret value duplicates API key %s" $key.name (get $seenValues $value)) }}
+  {{- end }}
+  {{- $_ := set $seenValues $value $key.name }}
+{{- end }}
+{{- $fullname := include "parseable.fullname" . }}
+{{- $target := printf "%s-querier-service" $fullname }}
+{{- if eq $p.deploymentMode "standalone" }}
+  {{- $target = printf "%s-standalone-service" $fullname }}
+{{- else if $p.enterprise.enabled }}
+  {{- $target = printf "%s-prism-service" $fullname }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-api-keys-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+data:
+  api-keys.json: |-
+    {{ toJson $p.apiKeys }}
+  reconcile-api-keys.py: |-
+    import base64
+    import json
+    import os
+    import re
+    import sys
+    from urllib.error import HTTPError, URLError
+    from urllib.parse import quote
+    from urllib.request import Request, urlopen
+
+    BASE = os.environ["PARSEABLE_BASE_URL"].rstrip("/")
+    AUTH = base64.b64encode(
+        f'{os.environ["P_USERNAME"]}:{os.environ["P_PASSWORD"]}'.encode()
+    ).decode()
+    PATH = "/api/prism/v1/apikeys"
+
+    class ReconcileError(Exception):
+        pass
+
+    def request(method, path, payload=None, expect_json=True):
+        body = None if payload is None else json.dumps(payload).encode()
+        headers = {"Authorization": f"Basic {AUTH}"}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        req = Request(BASE + path, data=body, headers=headers, method=method)
+        try:
+            with urlopen(req, timeout=20) as response:
+                content = response.read()
+                if not expect_json:
+                    return None
+                try:
+                    return json.loads(content) if content else None
+                except json.JSONDecodeError as error:
+                    raise ReconcileError(f"{method} {path}: invalid JSON response") from error
+        except HTTPError as error:
+            # Never print response bodies: a proxy could echo a credential.
+            raise ReconcileError(f"{method} {path}: HTTP {error.code}") from error
+        except URLError as error:
+            raise ReconcileError(f"{method} {path}: {error.reason}") from error
+
+    def load_desired():
+        with open("/scripts/api-keys.json", encoding="utf-8") as file:
+            configured = json.load(file)
+        desired = []
+        names = set()
+        values = set()
+        errors = []
+        for index, item in enumerate(configured):
+            name = item["name"]
+            roles = item["roles"]
+            value = os.environ.get(f"API_KEY_{index}")
+            if name in names:
+                errors.append(f"name={name}: duplicate API key name")
+            names.add(name)
+            if not value:
+                errors.append(
+                    f"name={name}: Secret {item['secretKeyRef']['name']} "
+                    f"is missing key {item['secretKeyRef']['key']} or its value is empty"
+                )
+            elif not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", value):
+                errors.append(
+                    f"name={name}: apiKey must be a UUID v4 in 8-4-4-4-12 format "
+                    "(no spaces or newline)"
+                )
+            elif value in values:
+                errors.append(f"name={name}: API key value is duplicated in apiKeys")
+            else:
+                values.add(value)
+            if not isinstance(roles, list) or len(roles) != len(set(roles)):
+                errors.append(f"name={name}: roles must be a list without duplicates")
+            desired.append((name, roles, value))
+        if errors:
+            raise ReconcileError("; ".join(errors))
+        return desired
+
+    def main():
+        # Validate every Secret value before making a create API call.
+        desired = load_desired()
+        if not desired:
+            listed = request("GET", PATH)
+            if not isinstance(listed, list) or any(
+                not isinstance(item, dict)
+                or not isinstance(item.get("keyName"), str)
+                or not isinstance(item.get("keyId"), str)
+                for item in listed
+            ):
+                raise ReconcileError("GET /api/prism/v1/apikeys returned an unexpected response")
+            if len({item["keyId"] for item in listed}) != len(listed):
+                raise ReconcileError("API key list contains duplicate IDs")
+            failures = []
+            for item in listed:
+                name, key_id = item["keyName"], item["keyId"]
+                try:
+                    request("DELETE", f"{PATH}/{quote(key_id, safe='')}", expect_json=False)
+                    print(f"name={name} deleted", flush=True)
+                except ReconcileError as error:
+                    failures.append(f"name={name}: {error}")
+            if failures:
+                raise ReconcileError("; ".join(failures))
+            print(f"Deleted {len(listed)} API key(s).")
+            return
+
+        known_roles = request("GET", "/api/v1/roles")
+        if not isinstance(known_roles, dict):
+            raise ReconcileError("GET /api/v1/roles returned an unexpected response")
+        missing = sorted({role for _, roles, _ in desired for role in roles} - set(known_roles))
+        if missing:
+            raise ReconcileError(f"unknown role(s): {', '.join(missing)}; create roles first")
+
+        listed = request("GET", PATH)
+        if not isinstance(listed, list):
+            raise ReconcileError("GET /api/prism/v1/apikeys returned an unexpected response")
+        existing = {}
+        seen_ids = set()
+        for item in listed:
+            if not isinstance(item, dict) or not isinstance(item.get("keyName"), str) or not isinstance(item.get("keyId"), str):
+                raise ReconcileError("API key list contains an unexpected entry")
+            if item["keyName"] in existing:
+                raise ReconcileError(f"duplicate existing API key name: {item['keyName']}")
+            if item["keyId"] in seen_ids:
+                raise ReconcileError(f"duplicate existing API key ID: {item['keyId']}")
+            seen_ids.add(item["keyId"])
+            existing[item["keyName"]] = item["keyId"]
+
+        # Preflight every key before changing roles or creating new keys.
+        pending = []
+        pending_updates = []
+        for name, roles, value in desired:
+            if name in existing:
+                detail = request("GET", f"{PATH}/{quote(existing[name], safe='')}")
+                if not isinstance(detail, dict) or not isinstance(detail.get("apiKey"), str) or not isinstance(detail.get("roles"), list):
+                    raise ReconcileError(f"name={name}: API key detail has an unexpected response")
+                if detail["apiKey"] != value:
+                    raise ReconcileError(
+                        f"name={name}: existing key value differs; "
+                        "rotate it explicitly, then rerun Helm"
+                    )
+                if set(detail["roles"]) == set(roles):
+                    print(f"name={name} unchanged")
+                else:
+                    pending_updates.append((name, existing[name], detail["roles"], roles, value))
+            else:
+                validation = request("POST", f"{PATH}/validate", {"apiKey": value})
+                if not isinstance(validation, dict) or not isinstance(validation.get("valid"), bool):
+                    raise ReconcileError("API key validation returned an unexpected response")
+                if validation["valid"]:
+                    raise ReconcileError(f"name={name}: this key value already belongs to another API key")
+                pending.append((name, roles, value))
+
+        for name, key_id, current_roles, roles, value in pending_updates:
+            user_path = f"/api/v1/user/{quote(key_id, safe='')}/role"
+            to_remove = sorted(set(current_roles) - set(roles))
+            to_add = sorted(set(roles) - set(current_roles))
+            if to_remove:
+                request("PATCH", f"{user_path}/remove", to_remove, expect_json=False)
+            if to_add:
+                request("PATCH", f"{user_path}/add", to_add, expect_json=False)
+            detail = request("GET", f"{PATH}/{quote(key_id, safe='')}")
+            if not isinstance(detail, dict) or detail.get("apiKey") != value or set(detail.get("roles", [])) != set(roles):
+                raise ReconcileError(f"name={name}: roles did not match after update")
+            print(f"name={name} roles updated")
+
+        for name, roles, value in pending:
+            created = request(
+                "POST", PATH,
+                {"keyName": name, "roles": roles, "apiKey": value},
+            )
+            accepted = (
+                isinstance(created, dict)
+                and created.get("apiKey") == value
+                and created.get("keyName") == name
+                and isinstance(created.get("roles"), list)
+                and set(created["roles"]) == set(roles)
+            )
+            if not accepted:
+                key_id = created.get("keyId") if isinstance(created, dict) else None
+                if isinstance(key_id, str):
+                    try:
+                        request("DELETE", f"{PATH}/{quote(key_id, safe='')}")
+                    except ReconcileError as error:
+                        raise ReconcileError(
+                            f"name={name}: server did not honor apiKey or roles "
+                            f"and rollback failed: {error}"
+                        ) from error
+                raise ReconcileError(
+                    f"name={name}: server did not honor apiKey or roles; "
+                    "deploy the updated Parseable image before creating API keys"
+                )
+            print(f"name={name} created")
+
+        wanted_names = {name for name, _, _ in desired}
+        failures = []
+        for name in sorted(set(existing) - wanted_names):
+            try:
+                request("DELETE", f"{PATH}/{quote(existing[name], safe='')}", expect_json=False)
+                print(f"name={name} deleted", flush=True)
+            except ReconcileError as error:
+                failures.append(f"name={name}: {error}")
+        if failures:
+            raise ReconcileError("; ".join(failures))
+        print("API key reconciliation completed successfully.")
+
+    try:
+        main()
+    except ReconcileError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(1)
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-api-keys
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "20"
+    "helm.sh/hook-output-log-policy": hook-failed
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 540
+  template:
+    metadata:
+      labels:
+        {{- include "parseable.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml $p.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: script
+          configMap:
+            name: {{ $fullname }}-api-keys-config
+      containers:
+        - name: reconcile-api-keys
+          image: docker.io/library/python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/scripts/reconcile-api-keys.py"]
+          env:
+            - name: PARSEABLE_BASE_URL
+              value: {{ printf "http://%s.%s" $target .Release.Namespace | quote }}
+            - name: P_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: username
+            - name: P_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: password
+            {{- range $index, $key := $p.apiKeys }}
+            - name: API_KEY_{{ $index }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $key.secretKeyRef.name | quote }}
+                  key: {{ $key.secretKeyRef.key | quote }}
+                  optional: true
+            {{- end }}
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+{{- end }}

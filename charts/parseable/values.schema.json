@@ -1,0 +1,247 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "parseable": {
+      "type": "object",
+      "properties": {
+        "datasets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "telemetryType",
+              "logSource"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "telemetryType": {
+                "type": "string",
+                "enum": [
+                  "logs",
+                  "metrics",
+                  "traces",
+                  "events"
+                ]
+              },
+              "logSource": {
+                "type": "string",
+                "enum": [
+                  "json",
+                  "otel-logs",
+                  "otel-metrics",
+                  "otel-traces"
+                ]
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "agent-observability",
+                    "k8s-observability",
+                    "database-observability"
+                  ]
+                }
+              },
+              "smartCache": {
+                "type": "object",
+                "required": [
+                  "size"
+                ],
+                "properties": {
+                  "size": {
+                    "type": [
+                      "string",
+                      "integer"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "retention": {
+                "type": "object",
+                "required": [
+                  "durationDays"
+                ],
+                "properties": {
+                  "durationDays": {
+                    "type": [
+                      "string",
+                      "integer"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "users": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "roles", "secretKeyRef"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 64,
+                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9]|[._@-][A-Za-z0-9])+$"
+              },
+              "roles": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "secretKeyRef": {
+                "type": "object",
+                "required": ["name", "key"],
+                "properties": {
+                  "name": {"type": "string", "minLength": 1},
+                  "key": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "roles", "users"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "roles": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "users": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "apiKeys": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "roles", "secretKeyRef"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "roles": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "secretKeyRef": {
+                "type": "object",
+                "required": ["name", "key"],
+                "properties": {
+                  "name": {"type": "string", "minLength": 1},
+                  "key": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "privileges"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 64,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]*[A-Za-z0-9]$"
+              },
+              "privileges": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "privilege"
+                  ],
+                  "properties": {
+                    "privilege": {
+                      "type": "string",
+                      "enum": [
+                        "ingestor",
+                        "reader",
+                        "writer",
+                        "admin",
+                        "editor"
+                      ]
+                    },
+                    "resource": {
+                      "type": "object"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "distributed": {
+          "type": "object",
+          "properties": {
+            "querier": {
+              "type": "object",
+              "properties": {
+                "persistence": {
+                  "type": "object",
+                  "not": {
+                    "required": [
+                      "smartCache"
+                    ]
+                  },
+                  "properties": {
+                    "hotTier": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "storageClass": {
+                          "type": "string"
+                        },
+                        "accessMode": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

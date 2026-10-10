@@ -1,0 +1,259 @@
+{{- $p := .Values.parseable }}
+{{- if hasKey $p "groups" }}
+{{- if not $p.enterprise.enabled }}
+  {{- fail "groups requires parseable.enterprise.enabled: true; the user-group API is available on Enterprise Prism" }}
+{{- end }}
+{{- if and (hasKey $p "roles") $p.groups }}
+  {{- include "parseable.validateRoleReferences" (dict "kind" "groups" "items" $p.groups "roles" $p.roles) }}
+{{- end }}
+{{- $knownUsers := list }}
+{{- if hasKey $p "users" }}
+  {{- range $user := $p.users }}
+    {{- $knownUsers = append $knownUsers $user.name }}
+  {{- end }}
+{{- end }}
+{{- $seen := dict }}
+{{- range $group := $p.groups }}
+  {{- if hasKey $seen $group.name }}
+    {{- fail (printf "groups: duplicate name %q" $group.name) }}
+  {{- end }}
+  {{- $_ := set $seen $group.name true }}
+  {{- if hasKey $p "users" }}
+    {{- range $user := $group.users }}
+      {{- if not (has $user $knownUsers) }}
+        {{- fail (printf "group %q: user %q is not listed in parseable.users; available: %s. Add the user there or omit parseable.users to use existing users" $group.name $user (join ", " $knownUsers | default "(none)")) }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- $fullname := include "parseable.fullname" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-groups-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+data:
+  groups.json: |-
+    {{ toJson $p.groups }}
+  reconcile-groups.py: |-
+    import base64
+    import json
+    import os
+    import sys
+    from urllib.error import HTTPError, URLError
+    from urllib.parse import quote
+    from urllib.request import Request, urlopen
+
+    BASE = os.environ["PARSEABLE_BASE_URL"].rstrip("/")
+    AUTH = base64.b64encode(
+        f'{os.environ["P_USERNAME"]}:{os.environ["P_PASSWORD"]}'.encode()
+    ).decode()
+    HEADERS = {"Authorization": f"Basic {AUTH}"}
+    PATH = "/api/prism/v1/usergroup"
+
+    class ReconcileError(Exception):
+        pass
+
+    def request(method, path, payload=None):
+        body = None if payload is None else json.dumps(payload).encode()
+        headers = dict(HEADERS)
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        req = Request(BASE + path, data=body, headers=headers, method=method)
+        try:
+            with urlopen(req, timeout=30) as response:
+                content = response.read()
+                return json.loads(content) if content else None
+        except HTTPError as error:
+            # Do not echo response bodies: they may include user information.
+            raise ReconcileError(f"{method} {path}: HTTP {error.code}") from error
+        except URLError as error:
+            raise ReconcileError(f"{method} {path}: {error.reason}") from error
+        except json.JSONDecodeError as error:
+            raise ReconcileError(f"{method} {path}: invalid JSON response") from error
+
+    def members(group):
+        entries = group.get("users")
+        if not isinstance(entries, list):
+            raise ReconcileError(f"group={group.get('name')}: unexpected users response")
+        result = {}
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("userid"), str) or not isinstance(entry.get("method"), str):
+                raise ReconcileError(f"group={group.get('name')}: unexpected member response")
+            if entry["method"] not in ("native", "oauth"):
+                raise ReconcileError(
+                    f"group={group.get('name')}: contains a {entry['method']} member; "
+                    "remove that member in Parseable before managing this group with Helm"
+                )
+            if entry["userid"] in result:
+                raise ReconcileError(f"group={group.get('name')}: duplicate member in response")
+            result[entry["userid"]] = entry["method"]
+        return result
+
+    def role_set(group):
+        roles = group.get("roles")
+        if not isinstance(roles, list) or not all(isinstance(role, str) for role in roles):
+            raise ReconcileError(f"group={group.get('name')}: unexpected roles response")
+        return set(roles)
+
+    def group_path(name):
+        return f"{PATH}/{quote(name, safe='')}"
+
+    def identifiers(names, methods=None):
+        return [
+            {"userid": name, "method": methods[name] if methods else "native"}
+            for name in sorted(names)
+        ]
+
+    def check_group(name, wanted_roles, wanted_users):
+        actual = request("GET", group_path(name))
+        if not isinstance(actual, dict) or role_set(actual) != wanted_roles or members(actual) != {name: "native" for name in wanted_users}:
+            raise ReconcileError(f"group={name}: roles or users did not match after update")
+
+    def main():
+        with open("/scripts/groups.json", encoding="utf-8") as file:
+            desired = json.load(file)
+        if not isinstance(desired, list):
+            raise ReconcileError("groups must be a list")
+        wanted = {}
+        for item in desired:
+            name = item["name"]
+            if name in wanted:
+                raise ReconcileError(f"duplicate group name: {name}")
+            wanted[name] = (set(item["roles"]), set(item["users"]))
+
+        if wanted:
+            available_roles = request("GET", "/api/v1/roles")
+            available_users = request("GET", "/api/v1/user")
+            if not isinstance(available_roles, dict) or not isinstance(available_users, list):
+                raise ReconcileError("role or user list returned an unexpected response")
+            missing_roles = sorted({role for roles, _ in wanted.values() for role in roles} - set(available_roles))
+            native_users = {
+                item["id"] for item in available_users
+                if isinstance(item, dict) and item.get("method") == "native" and isinstance(item.get("id"), str)
+            }
+            missing_users = sorted({user for _, users in wanted.values() for user in users} - native_users)
+            if missing_roles or missing_users:
+                details = []
+                if missing_roles:
+                    details.append(f"unknown role(s): {', '.join(missing_roles)}; create roles first")
+                if missing_users:
+                    details.append(f"unknown native user(s): {', '.join(missing_users)}; create users first")
+                raise ReconcileError("; ".join(details))
+            if os.environ["P_USERNAME"] in {user for _, users in wanted.values() for user in users}:
+                raise ReconcileError("root admin cannot be assigned to a group")
+
+        listed = request("GET", PATH)
+        if not isinstance(listed, list):
+            raise ReconcileError("GET usergroup returned an unexpected response")
+        current = {}
+        for group in listed:
+            if not isinstance(group, dict) or not isinstance(group.get("name"), str):
+                raise ReconcileError("group list contains an unexpected entry")
+            if group["name"] in current:
+                raise ReconcileError(f"duplicate existing group: {group['name']}")
+            current[group["name"]] = group
+
+        # Validate current groups before changing anything.
+        for group in current.values():
+            role_set(group)
+            members(group)
+
+        for name, (roles, users) in wanted.items():
+            existing = current.get(name)
+            if existing is None:
+                request("POST", PATH, {"name": name, "roles": sorted(roles), "users": identifiers(users)})
+                print(f"group={name} created", flush=True)
+            else:
+                old_roles = role_set(existing)
+                old_users = members(existing)
+                remove_roles = old_roles - roles
+                remove_users = {
+                    user for user, method in old_users.items()
+                    if user not in users or method != "native"
+                }
+                add_roles = roles - old_roles
+                add_users = {user for user in users if old_users.get(user) != "native"}
+                if remove_roles or remove_users:
+                    request("PATCH", group_path(name) + "/remove", {
+                        "roles": sorted(remove_roles), "users": identifiers(remove_users, old_users)
+                    })
+                if add_roles or add_users:
+                    request("PATCH", group_path(name) + "/add", {
+                        "roles": sorted(add_roles), "users": identifiers(add_users)
+                    })
+                print(f"group={name} {'updated' if remove_roles or remove_users or add_roles or add_users else 'unchanged'}", flush=True)
+            check_group(name, roles, users)
+
+        errors = []
+        for name in sorted(set(current) - set(wanted)):
+            try:
+                users = members(current[name])
+                if users:
+                    request("PATCH", group_path(name) + "/remove", {"users": identifiers(users, users)})
+                request("DELETE", group_path(name))
+                print(f"group={name} deleted", flush=True)
+            except ReconcileError as error:
+                errors.append(f"group={name}: {error}")
+        if errors:
+            raise ReconcileError("; ".join(errors))
+        print("Group reconciliation completed successfully.")
+
+    try:
+        main()
+    except ReconcileError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(1)
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-groups
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "35"
+    "helm.sh/hook-output-log-policy": hook-failed
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 540
+  template:
+    metadata:
+      labels:
+        {{- include "parseable.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml $p.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: script
+          configMap:
+            name: {{ $fullname }}-groups-config
+      containers:
+        - name: reconcile-groups
+          image: docker.io/library/python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/scripts/reconcile-groups.py"]
+          env:
+            - name: PARSEABLE_BASE_URL
+              value: {{ printf "http://%s-prism-service.%s" $fullname .Release.Namespace | quote }}
+            - name: P_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: username
+            - name: P_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: password
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+{{- end }}
