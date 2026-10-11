@@ -113,6 +113,10 @@ spec:
       initContainers:
         - name: wait-for-prism
           image: docker.io/curlimages/curl:latest
+          {{- with $node.initContainer.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command:
             - /bin/sh
             - -c
@@ -272,6 +276,10 @@ spec:
   volumeClaimTemplates:
     - metadata:
         name: hot-tier-volume
+        {{- with $hotTier.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
       spec:
         accessModes:
           - {{ $hotTier.accessMode | quote }}

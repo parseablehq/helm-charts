@@ -115,6 +115,10 @@ spec:
       initContainers:
         - name: wait-for-{{ $waitFor }}
           image: docker.io/curlimages/curl:latest
+          {{- with $node.initContainer.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command:
             - /bin/sh
             - -c
@@ -261,6 +265,10 @@ spec:
   volumeClaimTemplates:
     - metadata:
         name: stage-volume
+        {{- with $node.persistence.staging.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
       spec:
         accessModes:
           - {{ $node.persistence.staging.accessMode | quote }}
