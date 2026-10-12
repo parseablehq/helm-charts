@@ -49,13 +49,13 @@ data:
     def request(method, path):
         req = Request(base + path, headers={"Authorization": f"Basic {auth}"}, method=method)
         try:
-            with urlopen(req, timeout=30) as response:
+            with urlopen(req, timeout=120 if method == "DELETE" else 30) as response:
                 content = response.read()
                 return json.loads(content) if method == "GET" else None
         except HTTPError as error:
             detail = error.read(2048).decode("utf-8", errors="replace").strip()
             raise RuntimeError(f"{method} {path}: HTTP {error.code}: {detail}") from error
-        except (URLError, json.JSONDecodeError) as error:
+        except (URLError, TimeoutError, json.JSONDecodeError) as error:
             raise RuntimeError(f"{method} {path}: {error}") from error
 
     try:
@@ -67,9 +67,19 @@ data:
             raise RuntimeError("GET /api/v1/logstream returned an unexpected response")
         names = sorted({item["name"] for item in listed} - desired)
         failures = []
+        deleted = 0
         for name in names:
+            path = f"/api/v1/logstream/{quote(name, safe='')}"
             try:
-                request("DELETE", f"/api/v1/logstream/{quote(name, safe='')}")
+                info = request("GET", f"{path}/info")
+                if not isinstance(info, dict) or info.get("streamType") not in ("UserDefined", "Internal"):
+                    raise RuntimeError(f"GET {path}/info: missing or unknown streamType; refusing to delete")
+                if info["streamType"] == "Internal":
+                    print(f"dataset={name} is internal; skipping", flush=True)
+                    continue
+                print(f"dataset={name} deleting...", flush=True)
+                request("DELETE", path)
+                deleted += 1
                 print(f"dataset={name} deleted", flush=True)
             except RuntimeError as error:
                 failures.append(f"dataset={name}: {error}")
@@ -77,7 +87,7 @@ data:
             for failure in failures:
                 print(f"ERROR: {failure}", file=sys.stderr)
             sys.exit(1)
-        print(f"Deleted {len(names)} dataset(s) absent from values; keeping {len(desired)} listed dataset(s).")
+        print(f"Deleted {deleted} dataset(s) absent from values; keeping {len(desired)} listed dataset(s).")
     except RuntimeError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         sys.exit(1)
