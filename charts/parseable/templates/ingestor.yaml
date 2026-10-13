@@ -88,6 +88,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "parseable.serviceAccountName" . }}
+      {{- with $node.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
       terminationGracePeriodSeconds: {{ $node.terminationGracePeriodSeconds }}
       {{- if not $ent.enabled }}
       # OSS runs as non-root; the Enterprise image runs as its default user (root),

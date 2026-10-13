@@ -226,6 +226,8 @@ parseable:
       podLabels:
         app: parseable
         component: standalone
+      ## Name of an existing Kubernetes PriorityClass for the standalone pod.
+      priorityClassName: ""
       nodeSelector: {}
       tolerations: []
       affinity: {}
@@ -277,6 +279,8 @@ parseable:
       podLabels:
         app: parseable
         component: ingestor
+      ## Name of an existing Kubernetes PriorityClass for ingestor pods.
+      priorityClassName: ""
       nodeSelector: {}
       tolerations: []
       affinity: {}
@@ -320,6 +324,8 @@ parseable:
       podLabels:
         app: parseable
         component: querier
+      ## Name of an existing Kubernetes PriorityClass for querier pods.
+      priorityClassName: ""
       nodeSelector: {}
       tolerations: []
       affinity: {}
@@ -368,6 +374,8 @@ parseable:
       podLabels:
         app: parseable
         component: prism
+      ## Name of an existing Kubernetes PriorityClass for Prism pods.
+      priorityClassName: ""
       nodeSelector: {}
       tolerations: []
       affinity: {}
