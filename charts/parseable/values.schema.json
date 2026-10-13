@@ -86,7 +86,7 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["name", "roles", "secretKeyRef"],
+            "required": ["name", "roles"],
             "properties": {
               "name": {
                 "type": "string",
@@ -141,7 +141,7 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["name", "roles", "secretKeyRef"],
+            "required": ["name", "roles"],
             "properties": {
               "name": {"type": "string", "minLength": 1},
               "roles": {

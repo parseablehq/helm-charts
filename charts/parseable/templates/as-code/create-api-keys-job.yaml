@@ -8,11 +8,13 @@
 {{- end }}
 {{- $seen := dict }}
 {{- $seenValues := dict }}
+{{- $showGeneratedCredentials := false }}
 {{- range $key := $p.apiKeys }}
   {{- if hasKey $seen $key.name }}
     {{- fail (printf "apiKeys: duplicate name %q" $key.name) }}
   {{- end }}
   {{- $_ := set $seen $key.name true }}
+  {{- if hasKey $key "secretKeyRef" }}
   {{- $secret := lookup "v1" "Secret" $.Release.Namespace $key.secretKeyRef.name }}
   {{- if not $secret }}
     {{- fail (printf "apiKeys name=%s: Secret %s not found in namespace %s; create it before Helm upgrade (offline rendering cannot use lookup)" $key.name $key.secretKeyRef.name $.Release.Namespace) }}
@@ -30,6 +32,9 @@
     {{- fail (printf "apiKeys name=%s: Secret value duplicates API key %s" $key.name (get $seenValues $value)) }}
   {{- end }}
   {{- $_ := set $seenValues $value $key.name }}
+  {{- else }}
+  {{- $showGeneratedCredentials = true }}
+  {{- end }}
 {{- end }}
 {{- $fullname := include "parseable.fullname" . }}
 {{- $target := printf "%s-querier-service" $fullname }}
@@ -63,9 +68,20 @@ data:
         f'{os.environ["P_USERNAME"]}:{os.environ["P_PASSWORD"]}'.encode()
     ).decode()
     PATH = "/api/prism/v1/apikeys"
+    UUID_V4 = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
     class ReconcileError(Exception):
         pass
+
+    changes = {"created": 0, "updated": 0, "deleted": 0}
+
+    def report_error(error):
+        parts = [f"ERROR: {error}"]
+        if any(changes[kind] for kind in ("created", "updated", "deleted")):
+            parts.append("API keys: " + ", ".join(
+                f"{kind}={changes[kind]}" for kind in ("created", "updated", "deleted") if changes[kind]
+            ))
+        print(" | ".join(parts), file=sys.stderr, flush=True)
 
     def request(method, path, payload=None, expect_json=True):
         body = None if payload is None else json.dumps(payload).encode()
@@ -87,6 +103,8 @@ data:
             raise ReconcileError(f"{method} {path}: HTTP {error.code}") from error
         except URLError as error:
             raise ReconcileError(f"{method} {path}: {error.reason}") from error
+        except TimeoutError as error:
+            raise ReconcileError(f"{method} {path}: timed out") from error
 
     def load_desired():
         with open("/scripts/api-keys.json", encoding="utf-8") as file:
@@ -98,23 +116,24 @@ data:
         for index, item in enumerate(configured):
             name = item["name"]
             roles = item["roles"]
-            value = os.environ.get(f"API_KEY_{index}")
+            secret_ref = item.get("secretKeyRef")
+            value = os.environ.get(f"API_KEY_{index}") if secret_ref is not None else None
             if name in names:
                 errors.append(f"name={name}: duplicate API key name")
             names.add(name)
-            if not value:
+            if secret_ref is not None and not value:
                 errors.append(
-                    f"name={name}: Secret {item['secretKeyRef']['name']} "
-                    f"is missing key {item['secretKeyRef']['key']} or its value is empty"
+                    f"name={name}: Secret {secret_ref['name']} "
+                    f"is missing key {secret_ref['key']} or its value is empty"
                 )
-            elif not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", value):
+            elif value is not None and not UUID_V4.fullmatch(value):
                 errors.append(
                     f"name={name}: apiKey must be a UUID v4 in 8-4-4-4-12 format "
                     "(no spaces or newline)"
                 )
-            elif value in values:
+            elif value is not None and value in values:
                 errors.append(f"name={name}: API key value is duplicated in apiKeys")
-            else:
+            elif value is not None:
                 values.add(value)
             if not isinstance(roles, list) or len(roles) != len(set(roles)):
                 errors.append(f"name={name}: roles must be a list without duplicates")
@@ -124,7 +143,7 @@ data:
         return desired
 
     def main():
-        # Validate every Secret value before making a create API call.
+        # Validate provided Secret values before making a create API call.
         desired = load_desired()
         if not desired:
             listed = request("GET", PATH)
@@ -142,12 +161,11 @@ data:
                 name, key_id = item["keyName"], item["keyId"]
                 try:
                     request("DELETE", f"{PATH}/{quote(key_id, safe='')}", expect_json=False)
-                    print(f"name={name} deleted", flush=True)
+                    changes["deleted"] += 1
                 except ReconcileError as error:
                     failures.append(f"name={name}: {error}")
             if failures:
                 raise ReconcileError("; ".join(failures))
-            print(f"Deleted {len(listed)} API key(s).")
             return
 
         known_roles = request("GET", "/api/v1/roles")
@@ -180,21 +198,20 @@ data:
                 detail = request("GET", f"{PATH}/{quote(existing[name], safe='')}")
                 if not isinstance(detail, dict) or not isinstance(detail.get("apiKey"), str) or not isinstance(detail.get("roles"), list):
                     raise ReconcileError(f"name={name}: API key detail has an unexpected response")
-                if detail["apiKey"] != value:
+                if value is not None and detail["apiKey"] != value:
                     raise ReconcileError(
                         f"name={name}: existing key value differs; "
                         "rotate it explicitly, then rerun Helm"
                     )
-                if set(detail["roles"]) == set(roles):
-                    print(f"name={name} unchanged")
-                else:
-                    pending_updates.append((name, existing[name], detail["roles"], roles, value))
+                if set(detail["roles"]) != set(roles):
+                    pending_updates.append((name, existing[name], detail["roles"], roles, detail["apiKey"]))
             else:
-                validation = request("POST", f"{PATH}/validate", {"apiKey": value})
-                if not isinstance(validation, dict) or not isinstance(validation.get("valid"), bool):
-                    raise ReconcileError("API key validation returned an unexpected response")
-                if validation["valid"]:
-                    raise ReconcileError(f"name={name}: this key value already belongs to another API key")
+                if value is not None:
+                    validation = request("POST", f"{PATH}/validate", {"apiKey": value})
+                    if not isinstance(validation, dict) or not isinstance(validation.get("valid"), bool):
+                        raise ReconcileError("API key validation returned an unexpected response")
+                    if validation["valid"]:
+                        raise ReconcileError(f"name={name}: this key value already belongs to another API key")
                 pending.append((name, roles, value))
 
         for name, key_id, current_roles, roles, value in pending_updates:
@@ -208,16 +225,19 @@ data:
             detail = request("GET", f"{PATH}/{quote(key_id, safe='')}")
             if not isinstance(detail, dict) or detail.get("apiKey") != value or set(detail.get("roles", [])) != set(roles):
                 raise ReconcileError(f"name={name}: roles did not match after update")
-            print(f"name={name} roles updated")
+            changes["updated"] += 1
 
         for name, roles, value in pending:
+            payload = {"keyName": name, "roles": roles}
+            if value is not None:
+                payload["apiKey"] = value
             created = request(
-                "POST", PATH,
-                {"keyName": name, "roles": roles, "apiKey": value},
+                "POST", PATH, payload,
             )
             accepted = (
                 isinstance(created, dict)
-                and created.get("apiKey") == value
+                and isinstance(created.get("apiKey"), str)
+                and (created["apiKey"] == value if value is not None else bool(UUID_V4.fullmatch(created["apiKey"])))
                 and created.get("keyName") == name
                 and isinstance(created.get("roles"), list)
                 and set(created["roles"]) == set(roles)
@@ -236,24 +256,27 @@ data:
                     f"name={name}: server did not honor apiKey or roles; "
                     "deploy the updated Parseable image before creating API keys"
                 )
-            print(f"name={name} created")
+            if value is None:
+                display_name = name if re.fullmatch(r"[A-Za-z0-9._-]+", name) else json.dumps(name)
+                # Later creates or deletions may fail; keep this credential in Job logs.
+                print(f"New API key (save now): {display_name}={created['apiKey']}", flush=True)
+            changes["created"] += 1
 
         wanted_names = {name for name, _, _ in desired}
         failures = []
         for name in sorted(set(existing) - wanted_names):
             try:
                 request("DELETE", f"{PATH}/{quote(existing[name], safe='')}", expect_json=False)
-                print(f"name={name} deleted", flush=True)
+                changes["deleted"] += 1
             except ReconcileError as error:
                 failures.append(f"name={name}: {error}")
         if failures:
             raise ReconcileError("; ".join(failures))
-        print("API key reconciliation completed successfully.")
 
     try:
         main()
     except ReconcileError as error:
-        print(f"ERROR: {error}", file=sys.stderr)
+        report_error(error)
         sys.exit(1)
 ---
 apiVersion: batch/v1
@@ -266,7 +289,7 @@ metadata:
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "20"
-    "helm.sh/hook-output-log-policy": hook-failed
+    "helm.sh/hook-output-log-policy": {{ ternary "hook-failed,hook-succeeded" "hook-failed" $showGeneratedCredentials }}
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 0
@@ -302,12 +325,14 @@ spec:
                   name: {{ $p.store.secretName }}
                   key: password
             {{- range $index, $key := $p.apiKeys }}
+            {{- if hasKey $key "secretKeyRef" }}
             - name: API_KEY_{{ $index }}
               valueFrom:
                 secretKeyRef:
                   name: {{ $key.secretKeyRef.name | quote }}
                   key: {{ $key.secretKeyRef.key | quote }}
                   optional: true
+            {{- end }}
             {{- end }}
           volumeMounts:
             - name: script

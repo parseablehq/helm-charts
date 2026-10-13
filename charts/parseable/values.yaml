@@ -418,11 +418,12 @@ parseable:
   ## be deleted until those assignments are removed.
 
   ## Create native users after roles and API keys are ready.
-  ## Passwords come from an existing Kubernetes Secret, never from values.
+  ## Use secretKeyRef for a caller-provided password. Omit it to let Parseable
+  ## generate a password; the new password is printed once in Helm output.
+  ## Generated passwords also appear in Job and CI logs; save them securely.
   ## Existing users keep their password; only their direct roles are reconciled.
   ## Each user needs at least one role to log in; roles: [] is rejected.
-  ## Every listed user must reference a different password value, even when
-  ## passwords come from different Secret fields.
+  ## Caller-provided passwords must differ, even across Secret fields.
   ## When users is present, only listed native users are kept. Other native
   ## and OAuth users are deleted after reconciliation succeeds. Protected
   ## internal users and API-key-backed users are not deleted by this Job.
@@ -432,6 +433,8 @@ parseable:
   ##     secretKeyRef:
   ##       name: parseable-user-passwords
   ##       key: APPLICATION_LOGS_PASSWORD
+  ##   - name: generated-user
+  ##     roles: [application-logs-reader]
 
   ## Enterprise user groups run after users. Group members inherit its roles.
   ## users lists native Parseable usernames; existing OAuth members can be removed.
@@ -441,9 +444,11 @@ parseable:
   ##     roles: [application-logs-reader]
   ##     users: [application-logs-user]
 
-  ## Register caller-provided API keys after datasets and roles are ready.
-  ## Keep values in a Kubernetes Secret in this release's namespace, never here.
-  ## Secret values must be hyphenated UUID v4 strings, matching generated API keys.
+  ## Register API keys after datasets and roles are ready. Use secretKeyRef for
+  ## a caller-provided key, or omit it to let Parseable generate a key. Newly
+  ## generated keys are printed once in Helm output and also appear in Job and
+  ## CI logs; save them securely. Never put key values directly in values.yaml.
+  ## Secret values must be hyphenated UUID v4 strings.
   ## Existing matching keys are left unchanged. Changed roles are reconciled
   ## through the user-role API; roles: [] removes all assigned roles.
   ## A changed API key value fails safely because no key-rotation route exists.
@@ -454,6 +459,8 @@ parseable:
   ##     secretKeyRef:
   ##       name: parseable-api-keys
   ##       key: LOGS_KEY
+  ##   - name: generated-key
+  ##     roles: [application-logs-reader]
 
   ## ServiceMonitor for this Parseable deployment. Read more on ServiceMonitor
   ## here: https://prometheus-operator.dev/docs/api-reference/api/#monitoring.coreos.com/v1.ServiceMonitor

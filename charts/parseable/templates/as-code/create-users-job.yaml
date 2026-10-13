@@ -5,6 +5,7 @@
 {{- end }}
 {{- $seen := dict }}
 {{- $seenPasswords := dict }}
+{{- $showGeneratedCredentials := false }}
 {{- range $user := $p.users }}
   {{- if eq (len $user.roles) 0 }}
     {{- fail (printf "users name=%s: roles must contain at least one role; users without roles cannot log in. Set roles: [your-role]" $user.name) }}
@@ -13,6 +14,7 @@
     {{- fail (printf "users: duplicate name %q" $user.name) }}
   {{- end }}
   {{- $_ := set $seen $user.name true }}
+  {{- if hasKey $user "secretKeyRef" }}
   {{- $secret := lookup "v1" "Secret" $.Release.Namespace $user.secretKeyRef.name }}
   {{- if not $secret }}
     {{- fail (printf "users name=%s: Secret %s not found in namespace %s; create it before Helm upgrade (offline rendering cannot use lookup)" $user.name $user.secretKeyRef.name $.Release.Namespace) }}
@@ -31,6 +33,9 @@
     {{- fail (printf "users name=%s: password matches user %s; use a different password for each user" $user.name (get $seenPasswords $passwordHash)) }}
   {{- end }}
   {{- $_ := set $seenPasswords $passwordHash $user.name }}
+  {{- else }}
+  {{- $showGeneratedCredentials = true }}
+  {{- end }}
 {{- end }}
 {{- $fullname := include "parseable.fullname" . }}
 {{- $target := printf "%s-querier-service" $fullname }}
@@ -71,6 +76,16 @@ data:
     class ReconcileError(Exception):
         pass
 
+    changes = {"created": 0, "updated": 0, "deleted": 0}
+
+    def report_error(error):
+        parts = [f"ERROR: {error}"]
+        if any(changes[kind] for kind in ("created", "updated", "deleted")):
+            parts.append("Users: " + ", ".join(
+                f"{kind}={changes[kind]}" for kind in ("created", "updated", "deleted") if changes[kind]
+            ))
+        print(" | ".join(parts), file=sys.stderr, flush=True)
+
     def request(method, path, payload=None, response="json"):
         body = None if payload is None else json.dumps(payload).encode()
         headers = {"Authorization": f"Basic {AUTH}"}
@@ -93,6 +108,8 @@ data:
             raise ReconcileError(f"{method} {path}: HTTP {error.code}") from error
         except URLError as error:
             raise ReconcileError(f"{method} {path}: {error.reason}") from error
+        except TimeoutError as error:
+            raise ReconcileError(f"{method} {path}: timed out") from error
 
     def load_desired():
         with open("/scripts/users.json", encoding="utf-8") as file:
@@ -103,7 +120,8 @@ data:
         for index, item in enumerate(configured):
             name = item["name"]
             roles = item["roles"]
-            password = os.environ.get(f"USER_PASSWORD_{index}")
+            secret_ref = item.get("secretKeyRef")
+            password = os.environ.get(f"USER_PASSWORD_{index}") if secret_ref is not None else None
             if name in names:
                 errors.append(f"name={name}: duplicate user name")
             names.add(name)
@@ -111,14 +129,14 @@ data:
                 errors.append(f"name={name}: root admin user cannot be managed by this Job")
             elif name.lower() in RESERVED_NAMES:
                 errors.append(f"name={name}: reserved user name")
-            if password is None:
+            if secret_ref is not None and password is None:
                 errors.append(
-                    f"name={name}: Secret {item['secretKeyRef']['name']} "
-                    f"is missing key {item['secretKeyRef']['key']}"
+                    f"name={name}: Secret {secret_ref['name']} "
+                    f"is missing key {secret_ref['key']}"
                 )
-            elif not (8 <= len(password.encode("utf-8")) <= 256) or password.strip() != password or any(
+            elif password is not None and (not (8 <= len(password.encode("utf-8")) <= 256) or password.strip() != password or any(
                 unicodedata.category(char) == "Cc" for char in password
-            ):
+            )):
                 errors.append(
                     f"name={name}: password must be 8-256 bytes with no control "
                     "characters or surrounding whitespace"
@@ -131,7 +149,7 @@ data:
         return desired
 
     def main():
-        # Validate every Secret and role before creating or updating any user.
+        # Validate provided Secrets and roles before creating or updating users.
         desired = load_desired()
         if desired:
             known_roles = request("GET", "/api/v1/roles")
@@ -179,9 +197,7 @@ data:
             current = detail.get("roles") if isinstance(detail, dict) else None
             if not isinstance(current, dict):
                 raise ReconcileError(f"name={name}: user roles have an unexpected response")
-            if set(current) == set(roles):
-                print(f"name={name} roles unchanged; existing password not checked")
-            else:
+            if set(current) != set(roles):
                 pending_updates.append((name, set(current), set(roles)))
 
         for name, current, wanted in pending_updates:
@@ -195,18 +211,32 @@ data:
             detail = request("GET", path)
             if not isinstance(detail, dict) or not isinstance(detail.get("roles"), dict) or set(detail["roles"]) != wanted:
                 raise ReconcileError(f"name={name}: roles did not match after update")
-            print(f"name={name} roles updated")
+            changes["updated"] += 1
 
         for name, roles, password in pending:
             path = f"/api/v1/user/{quote(name, safe='')}"
+            payload = {"roles": roles}
+            if password is not None:
+                payload["password"] = password
             returned = request(
-                "POST", path,
-                {"roles": roles, "password": password},
+                "POST", path, payload,
                 response="text",
             )
-            accepted = returned == password
+            password_accepted = returned == password if password is not None else (
+                isinstance(returned, str)
+                and 8 <= len(returned.encode("utf-8")) <= 256
+                and returned.strip() == returned
+                and not any(unicodedata.category(char) == "Cc" for char in returned)
+            )
+            accepted = password_accepted
             if accepted:
-                detail = request("GET", f"{path}/role")
+                try:
+                    detail = request("GET", f"{path}/role")
+                except ReconcileError:
+                    if password is None:
+                        # The create succeeded, but its roles could not be verified.
+                        print(f"New user password (save now): {name}={returned}", flush=True)
+                    raise
                 accepted = (
                     isinstance(detail, dict)
                     and isinstance(detail.get("roles"), dict)
@@ -216,6 +246,8 @@ data:
                 try:
                     request("DELETE", path, response="none")
                 except ReconcileError as error:
+                    if password is None and password_accepted:
+                        print(f"New user password (save now): {name}={returned}", flush=True)
                     raise ReconcileError(
                         f"name={name}: server did not honor password or roles "
                         f"and rollback failed: {error}"
@@ -224,7 +256,10 @@ data:
                     f"name={name}: server did not honor password or roles; "
                     "deploy the updated Parseable image before creating users"
                 )
-            print(f"name={name} created")
+            if password is None:
+                # Flush before later creates or deletions can fail.
+                print(f"New user password (save now): {name}={returned}", flush=True)
+            changes["created"] += 1
 
         wanted_names = {name for name, _, _ in desired}
         stale_names = sorted(deletable_names - wanted_names - {os.environ["P_USERNAME"]})
@@ -232,17 +267,16 @@ data:
         for name in stale_names:
             try:
                 request("DELETE", f"/api/v1/user/{quote(name, safe='')}", response="none")
-                print(f"name={name} deleted", flush=True)
+                changes["deleted"] += 1
             except ReconcileError as error:
                 failures.append(f"name={name}: {error}")
         if failures:
             raise ReconcileError("; ".join(failures))
-        print("User reconciliation completed successfully.")
 
     try:
         main()
     except ReconcileError as error:
-        print(f"ERROR: {error}", file=sys.stderr)
+        report_error(error)
         sys.exit(1)
 ---
 apiVersion: batch/v1
@@ -255,7 +289,7 @@ metadata:
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "30"
-    "helm.sh/hook-output-log-policy": hook-failed
+    "helm.sh/hook-output-log-policy": {{ ternary "hook-failed,hook-succeeded" "hook-failed" $showGeneratedCredentials }}
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 0
@@ -291,12 +325,14 @@ spec:
                   name: {{ $p.store.secretName }}
                   key: password
             {{- range $index, $user := $p.users }}
+            {{- if hasKey $user "secretKeyRef" }}
             - name: USER_PASSWORD_{{ $index }}
               valueFrom:
                 secretKeyRef:
                   name: {{ $user.secretKeyRef.name | quote }}
                   key: {{ $user.secretKeyRef.key | quote }}
                   optional: true
+            {{- end }}
             {{- end }}
           volumeMounts:
             - name: script
