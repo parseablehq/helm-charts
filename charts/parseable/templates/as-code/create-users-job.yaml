@@ -58,6 +58,7 @@ data:
     import base64
     import json
     import os
+    import signal
     import sys
     import unicodedata
     from urllib.error import HTTPError, URLError
@@ -77,6 +78,18 @@ data:
         pass
 
     changes = {"created": 0, "updated": 0, "deleted": 0}
+    generated_credentials = []
+
+    def show_generated_credentials():
+        if generated_credentials:
+            print("New user passwords (save now): " + " | ".join(generated_credentials), flush=True)
+            generated_credentials.clear()
+
+    def handle_termination(signum, _frame):
+        show_generated_credentials()
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, handle_termination)
 
     def report_error(error):
         parts = [f"ERROR: {error}"]
@@ -235,7 +248,7 @@ data:
                 except ReconcileError:
                     if password is None:
                         # The create succeeded, but its roles could not be verified.
-                        print(f"New user password (save now): {name}={returned}", flush=True)
+                        generated_credentials.append(f"{name}={returned}")
                     raise
                 accepted = (
                     isinstance(detail, dict)
@@ -247,7 +260,7 @@ data:
                     request("DELETE", path, response="none")
                 except ReconcileError as error:
                     if password is None and password_accepted:
-                        print(f"New user password (save now): {name}={returned}", flush=True)
+                        generated_credentials.append(f"{name}={returned}")
                     raise ReconcileError(
                         f"name={name}: server did not honor password or roles "
                         f"and rollback failed: {error}"
@@ -257,8 +270,7 @@ data:
                     "deploy the updated Parseable image before creating users"
                 )
             if password is None:
-                # Flush before later creates or deletions can fail.
-                print(f"New user password (save now): {name}={returned}", flush=True)
+                generated_credentials.append(f"{name}={returned}")
             changes["created"] += 1
 
         wanted_names = {name for name, _, _ in desired}
@@ -278,6 +290,8 @@ data:
     except ReconcileError as error:
         report_error(error)
         sys.exit(1)
+    finally:
+        show_generated_credentials()
 ---
 apiVersion: batch/v1
 kind: Job

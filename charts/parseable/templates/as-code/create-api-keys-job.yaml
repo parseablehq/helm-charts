@@ -58,6 +58,7 @@ data:
     import json
     import os
     import re
+    import signal
     import sys
     from urllib.error import HTTPError, URLError
     from urllib.parse import quote
@@ -74,6 +75,18 @@ data:
         pass
 
     changes = {"created": 0, "updated": 0, "deleted": 0}
+    generated_credentials = []
+
+    def show_generated_credentials():
+        if generated_credentials:
+            print("New API keys (save now): " + " | ".join(generated_credentials), flush=True)
+            generated_credentials.clear()
+
+    def handle_termination(signum, _frame):
+        show_generated_credentials()
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, handle_termination)
 
     def report_error(error):
         parts = [f"ERROR: {error}"]
@@ -258,8 +271,7 @@ data:
                 )
             if value is None:
                 display_name = name if re.fullmatch(r"[A-Za-z0-9._-]+", name) else json.dumps(name)
-                # Later creates or deletions may fail; keep this credential in Job logs.
-                print(f"New API key (save now): {display_name}={created['apiKey']}", flush=True)
+                generated_credentials.append(f"{display_name}={created['apiKey']}")
             changes["created"] += 1
 
         wanted_names = {name for name, _, _ in desired}
@@ -278,6 +290,8 @@ data:
     except ReconcileError as error:
         report_error(error)
         sys.exit(1)
+    finally:
+        show_generated_credentials()
 ---
 apiVersion: batch/v1
 kind: Job
