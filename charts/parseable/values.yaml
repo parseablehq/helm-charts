@@ -396,6 +396,7 @@ parseable:
   ##       durationDays: 30d
   ##     smartCache:
   ##       size: 10Gi
+  ## Retention accepts 1d to 3650d; 0d or an empty value removes it.
   ## Smart Cache is Enterprise-only. size must be at least 10Gi; the
   ## Enterprise querier hot-tier volume must have enough usable disk space.
   ## Omit datasets to leave them untouched; set datasets: [] to delete all datasets.

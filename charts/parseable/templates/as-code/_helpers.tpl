@@ -9,8 +9,8 @@
 {{- fail (printf "dataset %s: retention.durationDays must be a positive whole number of days (e.g. 10d)" .name) -}}
 {{- else -}}
 {{- $digits := trimSuffix "d" $duration -}}
-{{- if or (gt (len $digits) 5) (gt (atoi $digits) 36500) -}}
-{{- fail (printf "dataset %s: retention.durationDays must be between 1d and 36500d" .name) -}}
+{{- if or (gt (len $digits) 4) (gt (atoi $digits) 3650) -}}
+{{- fail (printf "dataset %s: retention.durationDays must be between 1d and 3650d" .name) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
