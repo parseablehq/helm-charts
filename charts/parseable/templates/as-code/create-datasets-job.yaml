@@ -97,24 +97,31 @@ data:
     set -u
     base="{{ $url }}"
     errors=0
+    failures=""
+    applied=""
     response_file=$(mktemp)
-    trap 'rm -f "$response_file"' EXIT
+    curl_error_file=$(mktemp)
+    trap 'rm -f "$response_file" "$curl_error_file"' EXIT
 
     record_failure() {
       dataset="$1"
       step="$2"
       detail="$3"
-      echo "ERROR dataset=$dataset step=$step: $detail" >&2
+      failures="${failures}${failures:+ | }ERROR dataset=$dataset step=$step: $detail"
       errors=$((errors + 1))
     }
 
     api_failure() {
-      record_failure "$1" "$2" "$3"
+      detail="$3"
       if [ -s "$response_file" ]; then
-        echo "API response (first 2048 bytes):" >&2
-        head -c 2048 "$response_file" >&2
-        printf '\n' >&2
+        body=$(head -c 2048 "$response_file" | tr '\r\n' '  ' | tr -s ' ' | sed 's/^ *//; s/ *$//')
+        detail="$detail; API response: $body"
       fi
+      if [ -s "$curl_error_file" ]; then
+        curl_error=$(tr '\r\n' '  ' < "$curl_error_file" | tr -s ' ' | sed 's/^ *//; s/ *$//')
+        detail="$detail; $curl_error"
+      fi
+      record_failure "$1" "$2" "$detail"
     }
 
     run_step() {
@@ -122,12 +129,12 @@ data:
       step="$2"
       shift 2
       : > "$response_file"
-      echo "dataset=$dataset step=$step started"
+      : > "$curl_error_file"
       if status=$(curl -sS --connect-timeout 5 --max-time 30 \
-        -o "$response_file" -w '%{http_code}' -u "$P_USERNAME:$P_PASSWORD" "$@"); then
+        -o "$response_file" -w '%{http_code}' -u "$P_USERNAME:$P_PASSWORD" "$@" 2>"$curl_error_file"); then
         case "$status" in
           2[0-9][0-9])
-            echo "dataset=$dataset step=$step succeeded (HTTP $status)"
+            dataset_actions="${dataset_actions}${dataset_actions:+,}$step"
             return 0
             ;;
           *)
@@ -143,13 +150,14 @@ data:
     }
 
     {{- range $ds := $p.datasets }}
-    echo "Ensuring dataset {{ $ds.name }} exists..."
+    dataset_actions=""
     dataset_ready=0
     dataset_existed=0
     : > "$response_file"
+    : > "$curl_error_file"
     if status=$(curl -sS --connect-timeout 5 --max-time 30 \
       -o "$response_file" -w '%{http_code}' -u "$P_USERNAME:$P_PASSWORD" \
-      "$base/api/v1/logstream/{{ $ds.name }}/info"); then
+      "$base/api/v1/logstream/{{ $ds.name }}/info" 2>"$curl_error_file"); then
       case "$status" in
         200)
           dataset_ready=1
@@ -187,6 +195,7 @@ data:
       api_failure "{{ $ds.name }}" "lookup" "curl exit $curl_exit (HTTP $status)"
     fi
     if [ "$dataset_ready" -eq 1 ]; then
+      :
       {{- if and $p.enterprise.enabled (hasKey $ds "tags") }}
       if [ "$dataset_existed" -eq 1 ]; then
         run_step "{{ $ds.name }}" "tags" -X PUT -H "Content-Type: application/json" \
@@ -215,12 +224,17 @@ data:
         "$base/api/v1/logstream/{{ $ds.name }}/retention" || true
       {{- end }}
       {{- end }}
-    else
-      echo "dataset={{ $ds.name }}: skipped tags, Smart Cache, and retention because lookup/create failed" >&2
+    fi
+    if [ -n "$dataset_actions" ]; then
+      applied="${applied}${applied:+; }{{ $ds.name }}=$dataset_actions"
     fi
     {{- end }}
     if [ "$errors" -ne 0 ]; then
-      echo "Dataset configuration finished with $errors error(s)." >&2
+      if [ -n "$applied" ]; then
+        printf '%s | Applied: %s | %s error(s)\n' "$failures" "$applied" "$errors" >&2
+      else
+        printf '%s | %s error(s)\n' "$failures" "$errors" >&2
+      fi
       exit 1
     fi
     echo "Dataset configuration completed successfully."
