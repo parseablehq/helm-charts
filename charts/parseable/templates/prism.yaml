@@ -84,6 +84,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "parseable.serviceAccountName" . }}
+      {{- with $node.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
       terminationGracePeriodSeconds: {{ $node.terminationGracePeriodSeconds }}
       # prism runs the Enterprise image as its default user (root), which it needs
       # for its bundled ML (panorama) cache directories.
