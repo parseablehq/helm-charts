@@ -10,6 +10,9 @@
 {{- $roleNames := dict }}
 {{- $defaultOidcRole := "" }}
 {{- range $role := $p.roles }}
+  {{- if not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9]|[._@-][A-Za-z0-9])+$" $role.name) }}
+    {{- fail (printf "role name %q is invalid: use letters or digits at both ends; '.', '_', '@', '-' cannot appear together (e.g. payment-logs-editor)" $role.name) }}
+  {{- end }}
   {{- if hasKey $roleNames $role.name }}
     {{- fail (printf "roles: name %q appears more than once; keep one role entry and combine its privileges" $role.name) }}
   {{- end }}

@@ -7,6 +7,9 @@
 {{- $seenPasswords := dict }}
 {{- $showGeneratedCredentials := false }}
 {{- range $user := $p.users }}
+  {{- if not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9]|[._@-][A-Za-z0-9])+$" $user.name) }}
+    {{- fail (printf "user name %q is invalid: use letters or digits at both ends; '.', '_', '@', '-' can appear singly between them (e.g. user@example.com)" $user.name) }}
+  {{- end }}
   {{- if eq (len $user.roles) 0 }}
     {{- fail (printf "users name=%s: roles must contain at least one role; users without roles cannot log in. Set roles: [your-role]" $user.name) }}
   {{- end }}

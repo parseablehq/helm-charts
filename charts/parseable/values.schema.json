@@ -89,8 +89,7 @@
               "name": {
                 "type": "string",
                 "minLength": 3,
-                "maxLength": 64,
-                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9]|[._@-][A-Za-z0-9])+$"
+                "maxLength": 64
               },
               "roles": {
                 "type": "array",
@@ -118,8 +117,7 @@
             "properties": {
               "name": {
                 "type": "string",
-                "minLength": 1,
-                "pattern": "^[A-Za-z0-9_-]+$"
+                "minLength": 1
               },
               "roles": {
                 "type": "array",
@@ -169,8 +167,7 @@
               "name": {
                 "type": "string",
                 "minLength": 3,
-                "maxLength": 64,
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]*[A-Za-z0-9]$"
+                "maxLength": 64
               },
               "defaultOidcRole": {
                 "type": "boolean"

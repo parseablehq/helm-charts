@@ -10,6 +10,9 @@
 {{- $seenValues := dict }}
 {{- $showGeneratedCredentials := false }}
 {{- range $key := $p.apiKeys }}
+  {{- if not (regexMatch "^[A-Za-z0-9_-]+$" $key.name) }}
+    {{- fail (printf "API key name %q is invalid: use only letters, digits, '-' or '_' without spaces (e.g. payment-key)" $key.name) }}
+  {{- end }}
   {{- if hasKey $seen $key.name }}
     {{- fail (printf "apiKeys: duplicate name %q" $key.name) }}
   {{- end }}

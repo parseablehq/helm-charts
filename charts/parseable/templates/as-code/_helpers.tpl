@@ -38,7 +38,7 @@
 {{- define "parseable.validateDatasetName" -}}
 {{- $name := . -}}
 {{- if not (regexMatch "^[\\p{L}\\p{N}_-]+$" $name) -}}
-  {{- fail (printf "dataset name %q is invalid: use letters, digits, '-' or '_' without spaces (e.g. %q)" $name (replace " " "-" $name)) -}}
+  {{- fail (printf "dataset name %q is invalid: use letters, digits, '-' or '_' without spaces (e.g. payment-logs)" $name) -}}
 {{- end -}}
 {{- if has $name (list "select" "from" "where" "group" "by" "order" "limit" "offset" "join" "and" "sql") -}}
   {{- fail (printf "dataset name %q is invalid: SQL keywords cannot be dataset names; choose another name" $name) -}}

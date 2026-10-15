@@ -14,6 +14,9 @@
 {{- end }}
 {{- $seen := dict }}
 {{- range $group := $p.groups }}
+  {{- if not (regexMatch "^[A-Za-z0-9_-]+$" $group.name) }}
+    {{- fail (printf "group name %q is invalid: use only letters, digits, '-' or '_' without spaces (e.g. payment-team)" $group.name) }}
+  {{- end }}
   {{- if hasKey $seen $group.name }}
     {{- fail (printf "groups: duplicate name %q" $group.name) }}
   {{- end }}
