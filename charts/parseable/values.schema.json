@@ -42,9 +42,7 @@
                 "items": {
                   "type": "string",
                   "enum": [
-                    "agent-observability",
-                    "k8s-observability",
-                    "database-observability"
+                    "agent-observability"
                   ]
                 }
               },
