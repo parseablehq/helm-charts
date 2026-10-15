@@ -192,6 +192,10 @@ spec:
     {{- if $node.persistence.staging.enabled }}
     - metadata:
         name: stage-volume
+        {{- with $node.persistence.staging.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
       spec:
         accessModes:
           - {{ $node.persistence.staging.accessMode | quote }}
@@ -203,6 +207,10 @@ spec:
     {{- if and $local $node.persistence.data.enabled }}
     - metadata:
         name: data-volume
+        {{- with $node.persistence.data.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
       spec:
         accessModes:
           - {{ $node.persistence.data.accessMode | quote }}

@@ -212,6 +212,7 @@ parseable:
           storageClass: ""
           accessMode: ReadWriteOnce
           size: 5Gi
+          annotations: {}
         ## Staging directory. When enabled, it is backed by a PVC; when
         ## disabled, it uses emptyDir.
         staging:
@@ -219,6 +220,7 @@ parseable:
           storageClass: ""
           accessMode: ReadWriteOnce
           size: 5Gi
+          annotations: {}
       podAnnotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "80"
@@ -243,6 +245,15 @@ parseable:
     ## ingestor (OSS + Enterprise) - receives and stages incoming events.
     ingestor:
       replicas: 3
+      ## Resources for the readiness-wait init container.
+      initContainer:
+        resources:
+          requests:
+            cpu: 20m
+            memory: 16Mi
+          limits:
+            cpu: 250m
+            memory: 64Mi
       env:
         RUST_LOG: warn
         P_CHECK_UPDATE: "false"
@@ -272,6 +283,7 @@ parseable:
           storageClass: ""
           accessMode: ReadWriteOnce
           size: 5Gi
+          annotations: {}
       podAnnotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "80"
@@ -295,6 +307,15 @@ parseable:
     ## a single querier; Enterprise can run multiple queriers behind prism.
     querier:
       replicas: 1
+      ## Resources for the Enterprise prism readiness-wait init container.
+      initContainer:
+        resources:
+          requests:
+            cpu: 20m
+            memory: 16Mi
+          limits:
+            cpu: 250m
+            memory: 64Mi
       env:
         RUST_LOG: warn
         P_CHECK_UPDATE: "false"
@@ -317,6 +338,7 @@ parseable:
           storageClass: ""
           accessMode: ReadWriteOnce
           size: 50Gi
+          annotations: {}
       podAnnotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "80"
@@ -359,6 +381,7 @@ parseable:
         storageClass: ""
         accessMode: ReadWriteOnce
         size: 5Gi
+        annotations: {}
       ## Separate volume for Prism's PromQL results cache, mounted at
       ## /parseable/promql-cache (matches P_PROMQL_RESULTS_CACHE_DIR, which the
       ## chart sets automatically). Falls back to an emptyDir when disabled.
@@ -367,6 +390,7 @@ parseable:
         storageClass: ""
         accessMode: ReadWriteOnce
         size: 5Gi
+        annotations: {}
       podAnnotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "80"

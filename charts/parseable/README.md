@@ -60,6 +60,44 @@ one hot-tier PVC per querier; `false` uses `emptyDir`. These storage switches
 are install-time choices. Changing either switch later requires recreating the
 affected StatefulSet because its `volumeClaimTemplates` are immutable.
 
+Set annotations under each PVC's own persistence or cache config, for example:
+
+```yaml
+parseable:
+  distributed:
+    ingestor:
+      persistence:
+        staging:
+          annotations:
+            example.com/backup: "true"
+```
+
+The same `annotations` setting is available under standalone
+`persistence.data` and `persistence.staging`, distributed querier
+`persistence.hotTier`, and prism `persistence` and `cache`. Each applies only to
+its own PVC. Leave it empty when upgrading an existing StatefulSet.
+Adding or changing an annotation in `volumeClaimTemplates` on an existing
+StatefulSet is rejected by Kubernetes. The template only affects new PVCs; it
+does not update PVCs that already exist.
+
+The distributed ingestor readiness-wait init container accepts CPU and memory
+requests and limits under `distributed.ingestor.initContainer.resources`. In
+Enterprise mode, the querier's prism readiness-wait container uses
+`distributed.querier.initContainer.resources`. Both default to requests of
+20m CPU and 16Mi memory, and limits of 250m CPU and 64Mi memory. For example,
+to override the ingestor's requests:
+
+```yaml
+parseable:
+  distributed:
+    ingestor:
+      initContainer:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 32Mi
+```
+
 ```sh
 kubectl create namespace parseable
 ```
