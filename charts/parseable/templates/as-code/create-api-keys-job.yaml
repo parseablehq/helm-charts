@@ -307,7 +307,7 @@ metadata:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "20"
     "helm.sh/hook-output-log-policy": {{ ternary "hook-failed,hook-succeeded" "hook-failed" $showGeneratedCredentials }}
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
 spec:
   backoffLimit: 0
   activeDeadlineSeconds: 540
