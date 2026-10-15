@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=./values.schema.json
 ## Parseable Helm chart
 ## Single chart for both OSS and Enterprise editions of Parseable. OSS and
 ## Enterprise ship as separate images (see `image` vs `enterprise.image`
