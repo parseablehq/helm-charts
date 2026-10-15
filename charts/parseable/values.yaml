@@ -406,6 +406,7 @@ parseable:
   ## When roles is present, omitted roles are deleted after API keys, users,
   ## and groups reconcile. Omit roles entirely to leave every role untouched.
   ##   - name: application-logs-reader
+  ##     defaultOidcRole: true # Optional; at most one role. Omit to keep the current default.
   ##     privileges:
   ##       - privilege: reader
   ##         resource:

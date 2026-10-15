@@ -8,11 +8,18 @@
   {{- end }}
 {{- end }}
 {{- $roleNames := dict }}
+{{- $defaultOidcRole := "" }}
 {{- range $role := $p.roles }}
   {{- if hasKey $roleNames $role.name }}
     {{- fail (printf "roles: name %q appears more than once; keep one role entry and combine its privileges" $role.name) }}
   {{- end }}
   {{- $_ := set $roleNames $role.name true }}
+  {{- if $role.defaultOidcRole }}
+    {{- if $defaultOidcRole }}
+      {{- fail (printf "roles: only one role can have defaultOidcRole: true (%q and %q)" $defaultOidcRole $role.name) }}
+    {{- end }}
+    {{- $defaultOidcRole = $role.name }}
+  {{- end }}
   {{- $seen := dict }}
   {{- $wildcards := dict }}
   {{- $named := dict }}
@@ -147,17 +154,6 @@ data:
         if not stale_roles:
             print("No roles to delete.")
             sys.exit(0)
-        try:
-            default_role = request("GET", "/api/v1/role/default")
-        except RuntimeError as error:
-            print(f"ERROR checking default role: {error}; no roles were deleted.", file=sys.stderr)
-            sys.exit(1)
-        if isinstance(default_role, str) and default_role in stale_roles:
-            print(
-                f"ERROR role={default_role}: this is the default role; change the default role before removing it from parseable.roles.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
         errors = 0
         for name in stale_roles:
             try:
@@ -287,6 +283,23 @@ data:
     if errors:
         print(f"Role reconciliation finished with {errors} error(s).", file=sys.stderr)
         sys.exit(1)
+
+    default_oidc_roles = [role["name"] for role in desired_roles if role.get("defaultOidcRole")]
+    if default_oidc_roles:
+        desired_default = default_oidc_roles[0]
+        try:
+            current_default = request("GET", "/api/v1/role/default")
+            if current_default != desired_default:
+                request("PUT", "/api/v1/role/default", desired_default)
+                confirmed_default = request("GET", "/api/v1/role/default")
+                if confirmed_default != desired_default:
+                    raise RuntimeError(f"default OIDC role did not change to {desired_default}")
+                print(f"default OIDC role={desired_default} applied")
+            else:
+                print(f"default OIDC role={desired_default} unchanged")
+        except RuntimeError as error:
+            print(f"ERROR setting default OIDC role={desired_default}: {error}", file=sys.stderr)
+            sys.exit(1)
     print("Role reconciliation completed successfully.")
 {{- if gt (len $p.roles) 0 }}
 ---
