@@ -1,0 +1,358 @@
+{{- $p := .Values.parseable }}
+{{- if hasKey $p "users" }}
+{{- if and (hasKey $p "roles") $p.users }}
+  {{- include "parseable.validateRoleReferences" (dict "kind" "users" "items" $p.users "roles" $p.roles) }}
+{{- end }}
+{{- $seen := dict }}
+{{- $seenPasswords := dict }}
+{{- $showGeneratedCredentials := false }}
+{{- range $user := $p.users }}
+  {{- if not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9]|[._@-][A-Za-z0-9])+$" $user.name) }}
+    {{- fail (printf "user name %q is invalid: use letters or digits at both ends; '.', '_', '@', '-' can appear singly between them (e.g. user@example.com)" $user.name) }}
+  {{- end }}
+  {{- if eq (len $user.roles) 0 }}
+    {{- fail (printf "users name=%s: roles must contain at least one role; users without roles cannot log in. Set roles: [your-role]" $user.name) }}
+  {{- end }}
+  {{- if hasKey $seen $user.name }}
+    {{- fail (printf "users: duplicate name %q" $user.name) }}
+  {{- end }}
+  {{- $_ := set $seen $user.name true }}
+  {{- if hasKey $user "secretKeyRef" }}
+  {{- $secret := lookup "v1" "Secret" $.Release.Namespace $user.secretKeyRef.name }}
+  {{- if not $secret }}
+    {{- fail (printf "users name=%s: Secret %s not found in namespace %s; create it before Helm upgrade (offline rendering cannot use lookup)" $user.name $user.secretKeyRef.name $.Release.Namespace) }}
+  {{- end }}
+  {{- $data := default (dict) (get $secret "data") }}
+  {{- $encoded := get $data $user.secretKeyRef.key }}
+  {{- if not $encoded }}
+    {{- fail (printf "users name=%s: Secret %s has no %s field or it is empty" $user.name $user.secretKeyRef.name $user.secretKeyRef.key) }}
+  {{- end }}
+  {{- $password := b64dec $encoded }}
+  {{- if or (lt (len $password) 8) (gt (len $password) 256) (ne (trim $password) $password) (regexMatch "\\p{Cc}" $password) }}
+    {{- fail (printf "users name=%s: Secret %s field %s must contain 8-256 bytes with no control characters or surrounding whitespace" $user.name $user.secretKeyRef.name $user.secretKeyRef.key) }}
+  {{- end }}
+  {{- $passwordHash := sha256sum $password }}
+  {{- if hasKey $seenPasswords $passwordHash }}
+    {{- fail (printf "users name=%s: password matches user %s; use a different password for each user" $user.name (get $seenPasswords $passwordHash)) }}
+  {{- end }}
+  {{- $_ := set $seenPasswords $passwordHash $user.name }}
+  {{- else }}
+  {{- $showGeneratedCredentials = true }}
+  {{- end }}
+{{- end }}
+{{- $fullname := include "parseable.fullname" . }}
+{{- $target := printf "%s-querier-service" $fullname }}
+{{- if eq $p.deploymentMode "standalone" }}
+  {{- $target = printf "%s-standalone-service" $fullname }}
+{{- else if $p.enterprise.enabled }}
+  {{- $target = printf "%s-prism-service" $fullname }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-users-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+data:
+  users.json: |-
+    {{ toJson $p.users }}
+  reconcile-users.py: |-
+    import base64
+    import json
+    import os
+    import signal
+    import sys
+    import unicodedata
+    from urllib.error import HTTPError, URLError
+    from urllib.parse import quote
+    from urllib.request import Request, urlopen
+
+    BASE = os.environ["PARSEABLE_BASE_URL"].rstrip("/")
+    AUTH = base64.b64encode(
+        f'{os.environ["P_USERNAME"]}:{os.environ["P_PASSWORD"]}'.encode()
+    ).decode()
+    RESERVED_NAMES = {
+        "super-admin", "superadmin", "admin", "user", "role", "null",
+        "undefined", "none", "empty", "password", "username",
+    }
+
+    class ReconcileError(Exception):
+        pass
+
+    changes = {"created": 0, "updated": 0, "deleted": 0}
+    generated_credentials = []
+
+    def show_generated_credentials():
+        if generated_credentials:
+            print("New user passwords (save now): " + " | ".join(generated_credentials), flush=True)
+            generated_credentials.clear()
+
+    def handle_termination(signum, _frame):
+        show_generated_credentials()
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, handle_termination)
+
+    def report_error(error):
+        parts = [f"ERROR: {error}"]
+        if any(changes[kind] for kind in ("created", "updated", "deleted")):
+            parts.append("Users: " + ", ".join(
+                f"{kind}={changes[kind]}" for kind in ("created", "updated", "deleted") if changes[kind]
+            ))
+        print(" | ".join(parts), file=sys.stderr, flush=True)
+
+    def request(method, path, payload=None, response="json"):
+        body = None if payload is None else json.dumps(payload).encode()
+        headers = {"Authorization": f"Basic {AUTH}"}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        req = Request(BASE + path, data=body, headers=headers, method=method)
+        try:
+            with urlopen(req, timeout=20) as result:
+                content = result.read()
+                if response == "none":
+                    return None
+                if response == "text":
+                    return content.decode("utf-8")
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError as error:
+                    raise ReconcileError(f"{method} {path}: invalid JSON response") from error
+        except HTTPError as error:
+            # Response bodies can contain credentials; never print them.
+            raise ReconcileError(f"{method} {path}: HTTP {error.code}") from error
+        except URLError as error:
+            raise ReconcileError(f"{method} {path}: {error.reason}") from error
+        except TimeoutError as error:
+            raise ReconcileError(f"{method} {path}: timed out") from error
+
+    def load_desired():
+        with open("/scripts/users.json", encoding="utf-8") as file:
+            configured = json.load(file)
+        desired = []
+        names = set()
+        errors = []
+        for index, item in enumerate(configured):
+            name = item["name"]
+            roles = item["roles"]
+            secret_ref = item.get("secretKeyRef")
+            password = os.environ.get(f"USER_PASSWORD_{index}") if secret_ref is not None else None
+            if name in names:
+                errors.append(f"name={name}: duplicate user name")
+            names.add(name)
+            if name == os.environ["P_USERNAME"]:
+                errors.append(f"name={name}: root admin user cannot be managed by this Job")
+            elif name.lower() in RESERVED_NAMES:
+                errors.append(f"name={name}: reserved user name")
+            if secret_ref is not None and password is None:
+                errors.append(
+                    f"name={name}: Secret {secret_ref['name']} "
+                    f"is missing key {secret_ref['key']}"
+                )
+            elif password is not None and (not (8 <= len(password.encode("utf-8")) <= 256) or password.strip() != password or any(
+                unicodedata.category(char) == "Cc" for char in password
+            )):
+                errors.append(
+                    f"name={name}: password must be 8-256 bytes with no control "
+                    "characters or surrounding whitespace"
+                )
+            if not isinstance(roles, list) or len(roles) != len(set(roles)):
+                errors.append(f"name={name}: roles must be a list without duplicates")
+            desired.append((name, roles, password))
+        if errors:
+            raise ReconcileError("; ".join(errors))
+        return desired
+
+    def main():
+        # Validate provided Secrets and roles before creating or updating users.
+        desired = load_desired()
+        if desired:
+            known_roles = request("GET", "/api/v1/roles")
+            if not isinstance(known_roles, dict):
+                raise ReconcileError("GET /api/v1/roles returned an unexpected response")
+            missing = sorted({role for _, roles, _ in desired for role in roles} - set(known_roles))
+            if missing:
+                raise ReconcileError(f"unknown role(s): {', '.join(missing)}; create roles first")
+
+        listed = request("GET", "/api/v1/user")
+        if not isinstance(listed, list):
+            raise ReconcileError("GET /api/v1/user returned an unexpected response")
+        existing = {}
+        for item in listed:
+            if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not isinstance(item.get("method"), str):
+                raise ReconcileError("user list contains an unexpected entry")
+            if item["id"] in existing:
+                raise ReconcileError(f"duplicate existing user ID: {item['id']}")
+            existing[item["id"]] = item["method"]
+
+        # This endpoint excludes protected internal users and API-key users.
+        deletable = request("GET", "/api/v1/users")
+        if not isinstance(deletable, list):
+            raise ReconcileError("GET /api/v1/users returned an unexpected response")
+        deletable_names = set()
+        for item in deletable:
+            if not isinstance(item, dict) or not isinstance(item.get("id"), str) or item.get("method") not in ("native", "oauth"):
+                raise ReconcileError("deletable user list contains an unexpected entry")
+            if item["id"] in deletable_names or existing.get(item["id"]) != item["method"]:
+                raise ReconcileError(f"deletable user list is inconsistent for {item['id']}")
+            deletable_names.add(item["id"])
+
+        pending = []
+        pending_updates = []
+        for name, roles, password in desired:
+            if name not in existing:
+                pending.append((name, roles, password))
+                continue
+            if existing[name] != "native":
+                raise ReconcileError(f"name={name}: existing user is {existing[name]}, not native")
+            if name not in deletable_names:
+                raise ReconcileError(f"name={name}: existing user is protected and cannot be managed")
+            path = f"/api/v1/user/{quote(name, safe='')}/role"
+            detail = request("GET", path)
+            current = detail.get("roles") if isinstance(detail, dict) else None
+            if not isinstance(current, dict):
+                raise ReconcileError(f"name={name}: user roles have an unexpected response")
+            if set(current) != set(roles):
+                pending_updates.append((name, set(current), set(roles)))
+
+        for name, current, wanted in pending_updates:
+            path = f"/api/v1/user/{quote(name, safe='')}/role"
+            to_remove = sorted(current - wanted)
+            to_add = sorted(wanted - current)
+            if to_remove:
+                request("PATCH", f"{path}/remove", to_remove, response="none")
+            if to_add:
+                request("PATCH", f"{path}/add", to_add, response="none")
+            detail = request("GET", path)
+            if not isinstance(detail, dict) or not isinstance(detail.get("roles"), dict) or set(detail["roles"]) != wanted:
+                raise ReconcileError(f"name={name}: roles did not match after update")
+            changes["updated"] += 1
+
+        for name, roles, password in pending:
+            path = f"/api/v1/user/{quote(name, safe='')}"
+            payload = {"roles": roles}
+            if password is not None:
+                payload["password"] = password
+            returned = request(
+                "POST", path, payload,
+                response="text",
+            )
+            password_accepted = returned == password if password is not None else (
+                isinstance(returned, str)
+                and 8 <= len(returned.encode("utf-8")) <= 256
+                and returned.strip() == returned
+                and not any(unicodedata.category(char) == "Cc" for char in returned)
+            )
+            accepted = password_accepted
+            if accepted:
+                try:
+                    detail = request("GET", f"{path}/role")
+                except ReconcileError:
+                    if password is None:
+                        # The create succeeded, but its roles could not be verified.
+                        generated_credentials.append(f"{name}={returned}")
+                    raise
+                accepted = (
+                    isinstance(detail, dict)
+                    and isinstance(detail.get("roles"), dict)
+                    and set(detail["roles"]) == set(roles)
+                )
+            if not accepted:
+                try:
+                    request("DELETE", path, response="none")
+                except ReconcileError as error:
+                    if password is None and password_accepted:
+                        generated_credentials.append(f"{name}={returned}")
+                    raise ReconcileError(
+                        f"name={name}: server did not honor password or roles "
+                        f"and rollback failed: {error}"
+                    ) from error
+                raise ReconcileError(
+                    f"name={name}: server did not honor password or roles; "
+                    "deploy the updated Parseable image before creating users"
+                )
+            if password is None:
+                generated_credentials.append(f"{name}={returned}")
+            changes["created"] += 1
+
+        wanted_names = {name for name, _, _ in desired}
+        stale_names = sorted(deletable_names - wanted_names - {os.environ["P_USERNAME"]})
+        failures = []
+        for name in stale_names:
+            try:
+                request("DELETE", f"/api/v1/user/{quote(name, safe='')}", response="none")
+                changes["deleted"] += 1
+            except ReconcileError as error:
+                failures.append(f"name={name}: {error}")
+        if failures:
+            raise ReconcileError("; ".join(failures))
+
+    try:
+        main()
+    except ReconcileError as error:
+        report_error(error)
+        sys.exit(1)
+    finally:
+        show_generated_credentials()
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-users
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "30"
+    "helm.sh/hook-output-log-policy": {{ ternary "hook-failed,hook-succeeded" "hook-failed" $showGeneratedCredentials }}
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 540
+  template:
+    metadata:
+      labels:
+        {{- include "parseable.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml $p.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: script
+          configMap:
+            name: {{ $fullname }}-users-config
+      containers:
+        - name: reconcile-users
+          image: docker.io/library/python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/scripts/reconcile-users.py"]
+          env:
+            - name: PARSEABLE_BASE_URL
+              value: {{ printf "http://%s.%s" $target .Release.Namespace | quote }}
+            - name: P_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: username
+            - name: P_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: password
+            {{- range $index, $user := $p.users }}
+            {{- if hasKey $user "secretKeyRef" }}
+            - name: USER_PASSWORD_{{ $index }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $user.secretKeyRef.name | quote }}
+                  key: {{ $user.secretKeyRef.key | quote }}
+                  optional: true
+            {{- end }}
+            {{- end }}
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+{{- end }}

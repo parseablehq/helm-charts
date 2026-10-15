@@ -1,0 +1,486 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "parseable": {
+      "type": "object",
+      "description": "Configuration for the Parseable Helm release.",
+      "properties": {
+        "deploymentMode": {
+          "description": "standalone runs one OSS pod; distributed runs separate ingestor and querier pods and is required for Enterprise."
+        },
+        "image": {
+          "description": "OSS container image used by standalone and distributed ingestor/querier pods when Enterprise is disabled.",
+          "properties": {
+            "repository": {"description": "OSS image repository, for example quay.io/parseablehq/parseable."},
+            "tag": {"description": "OSS image tag. An empty value uses the chart appVersion."},
+            "pullPolicy": {"description": "Kubernetes image pull policy, for example IfNotPresent or Always."}
+          }
+        },
+        "imagePullSecrets": {"description": "Names of existing Kubernetes Secrets used to pull the OSS image from a private registry."},
+        "store": {
+          "description": "Storage backend and the Secret holding Parseable admin and storage credentials.",
+          "properties": {
+            "type": {
+              "description": "Storage backend: local-store (standalone only), s3-store, gcs-store, or blob-store."
+            },
+            "secretName": {
+              "description": "Existing Secret with admin username/password and the selected object-store settings."
+            },
+            "gcsCredentials": {
+              "description": "GCS service-account key Secret; used only with gcs-store.",
+              "properties": {
+                "secretName": {"description": "Existing Secret containing the GCS service-account JSON key."},
+                "secretKey": {"description": "Field in the Secret holding the GCS key JSON."},
+                "mountPath": {"description": "Directory where the GCS key is mounted in Parseable pods."}
+              }
+            }
+          }
+        },
+        "clusterSecret": {
+          "description": "Shared authentication secret for distributed nodes; required for Enterprise, optional for OSS, and unused in standalone mode.",
+          "properties": {
+            "enabled": {"description": "Inject P_CLUSTER_SECRET into distributed nodes when true."},
+            "secretName": {"description": "Name of the existing Kubernetes Secret containing the cluster secret."},
+            "secretKey": {"description": "Field in that Secret containing the shared cluster value."}
+          }
+        },
+        "enterprise": {
+          "description": "Enterprise edition settings. Enable only with deploymentMode: distributed.",
+          "properties": {
+            "enabled": {"description": "Use the Enterprise image and deploy Prism when true."},
+            "image": {
+              "description": "Container image used by Enterprise ingestor, querier, and Prism pods.",
+              "properties": {
+                "repository": {"description": "Enterprise image repository, for example quay.io/parseablehq/parseable-enterprise."},
+                "tag": {"description": "Enterprise image tag. An empty value uses the chart appVersion."},
+                "pullPolicy": {"description": "Kubernetes image pull policy, for example Always or IfNotPresent."}
+              }
+            },
+            "license": {
+              "description": "Enterprise license data and signature loaded from Kubernetes Secrets at startup.",
+              "properties": {
+                "secretName": {"description": "Existing Secret containing the Enterprise license JSON and, for file mode, its signature."},
+                "mountPath": {"description": "Directory where the license files are mounted read-only inside each Enterprise pod."},
+                "dataKey": {"description": "Filename/Secret field containing the license JSON data."},
+                "signature": {
+                  "description": "How the Enterprise license signature is provided.",
+                  "properties": {
+                    "source": {"description": "file reads the signature from license.secretName; base64 reads it from signature.base64."},
+                    "key": {"description": "Signature filename/Secret field when source is file."},
+                    "base64": {
+                      "description": "Secret reference for a base64-encoded signature when source is base64.",
+                      "properties": {
+                        "secretName": {"description": "Existing Secret holding the base64 signature."},
+                        "key": {"description": "Field in that Secret containing the base64 signature."}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "datasets": {
+          "type": "array",
+          "description": "Datasets managed by this release. Omit to leave datasets unchanged; use [] to delete all deletable user datasets.",
+          "items": {
+            "type": "object",
+            "description": "One dataset and its optional tags, Smart Cache, and retention settings.",
+            "required": [
+              "name",
+              "telemetryType",
+              "logSource"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Unique dataset name. Use letters, digits, hyphens, or underscores; the name cannot be changed later."
+              },
+              "telemetryType": {
+                "type": "string",
+                "description": "Kind of telemetry stored in this dataset. Must match an OTel log source and cannot change after creation.",
+                "enum": [
+                  "logs",
+                  "metrics",
+                  "traces"
+                ]
+              },
+              "logSource": {
+                "type": "string",
+                "description": "Incoming data format. otel-logs, otel-metrics, and otel-traces require the matching telemetryType. Cannot change after creation.",
+                "enum": [
+                  "json",
+                  "otel-logs",
+                  "otel-metrics",
+                  "otel-traces"
+                ]
+              },
+              "tags": {
+                "type": "array",
+                "description": "Optional dataset tags. agent-observability requires telemetryType: traces and logSource: otel-traces.",
+                "items": {
+                  "type": "string",
+                  "description": "Tag assigned to this dataset.",
+                  "enum": [
+                    "agent-observability"
+                  ]
+                }
+              },
+              "smartCache": {
+                "type": "object",
+                "description": "Enterprise-only Smart Cache for this dataset. The querier needs enough usable disk space for the requested size.",
+                "required": [
+                  "size"
+                ],
+                "properties": {
+                  "size": {
+                    "type": [
+                      "string",
+                      "integer"
+                    ],
+                    "description": "Cache size, for example 10Gi. Minimum 10Gi. Use 0Gi or \"\" to remove Smart Cache from an existing dataset."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "retention": {
+                "type": "object",
+                "description": "Dataset retention rule. Omit to leave the current rule unchanged.",
+                "required": [
+                  "durationDays"
+                ],
+                "properties": {
+                  "durationDays": {
+                    "type": [
+                      "string",
+                      "integer"
+                    ],
+                    "description": "Keep data for 1d to 3650d, for example 30d. Use 0d or \"\" to remove retention."
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "users": {
+          "type": "array",
+          "description": "Native users managed by this release. Omit to leave users unchanged; use [] to delete all deletable users.",
+          "items": {
+            "type": "object",
+            "description": "One native user and the roles assigned directly to them.",
+            "required": ["name", "roles"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 64,
+                "description": "Parseable username, 3 to 64 characters. Letters and digits are required at both ends."
+              },
+              "roles": {
+                "type": "array",
+                "description": "Roles assigned directly to this user. At least one is required so the user can log in.",
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1, "description": "Name of an existing or configured role."}
+              },
+              "secretKeyRef": {
+                "type": "object",
+                "description": "Optional Kubernetes Secret field containing the user's password. Omit to generate a password for a new user and print it on terminal.",
+                "required": ["name", "key"],
+                "properties": {
+                  "name": {"type": "string", "minLength": 1, "description": "Kubernetes Secret name in this release's namespace."},
+                  "key": {"type": "string", "minLength": 1, "description": "Field in the Secret containing this user's password."}
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "groups": {
+          "type": "array",
+          "description": "Enterprise user groups managed by this release. Omit to leave groups unchanged; use [] to delete all groups.",
+          "items": {
+            "type": "object",
+            "description": "One group whose members inherit its roles.",
+            "required": ["name", "roles", "users"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Group name. Use only letters, digits, hyphens, or underscores."
+              },
+              "roles": {
+                "type": "array",
+                "description": "Roles inherited by this group's members.",
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1, "description": "Name of an existing or configured role."}
+              },
+              "users": {
+                "type": "array",
+                "description": "Native Parseable usernames to include in this group.",
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1, "description": "Username of a native Parseable user."}
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "apiKeys": {
+          "type": "array",
+          "description": "API keys managed by this release. Omit to leave keys unchanged; use [] to revoke all API keys.",
+          "items": {
+            "type": "object",
+            "description": "One named API key and its assigned roles.",
+            "required": ["name", "roles"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1, "description": "Unique API key name. Use only letters, digits, hyphens, or underscores."},
+              "roles": {
+                "type": "array",
+                "description": "Roles assigned to this API key. Use [] to remove all assigned roles.",
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1, "description": "Name of an existing or configured role."}
+              },
+              "secretKeyRef": {
+                "type": "object",
+                "description": "Optional Kubernetes Secret field containing a caller-supplied UUID v4 API key. Omit to generate a key for a new entry and print it once in Helm output.",
+                "required": ["name", "key"],
+                "properties": {
+                  "name": {"type": "string", "minLength": 1, "description": "Kubernetes Secret name in this release's namespace."},
+                  "key": {"type": "string", "minLength": 1, "description": "Field in the Secret containing this API key value."}
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "roles": {
+          "type": "array",
+          "description": "Roles managed by this release. Omit to leave roles unchanged; use [] to delete all user-defined roles after their assignments are removed.",
+          "items": {
+            "type": "object",
+            "description": "One named role and its privileges.",
+            "required": ["name", "privileges"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 64,
+                "description": "Role name, 3 to 64 characters. Letters and digits are required at both ends."
+              },
+              "defaultOidcRole": {
+                "type": "boolean",
+                "description": "Mark this as the default OIDC role. At most one role may set this to true; omit to keep the current default."
+              },
+              "privileges": {
+                "type": "array",
+                "description": "Permissions granted by this role. Use [] to remove all privileges while keeping the role.",
+                "items": {
+                  "type": "object",
+                  "description": "One privilege and, when required, its dataset resource.",
+                  "required": [
+                    "privilege"
+                  ],
+                  "properties": {
+                    "privilege": {
+                      "type": "string",
+                      "description": "admin and editor are global and have no resource. ingestor, reader, and writer require resource.dataset.",
+                      "enum": [
+                        "ingestor",
+                        "reader",
+                        "writer",
+                        "admin",
+                        "editor"
+                      ]
+                    },
+                    "resource": {
+                      "type": "object",
+                      "description": "Dataset scope for ingestor, reader, or writer. Do not set this for admin or editor.",
+                      "properties": {
+                        "dataset": {
+                          "description": "One dataset name, a list of names, or all to grant this privilege on every dataset."
+                        }
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "distributed": {
+          "type": "object",
+          "description": "Settings for distributed Parseable nodes.",
+          "properties": {
+            "ingestor": {
+              "description": "Nodes that receive and stage incoming events.",
+              "properties": {
+                "replicas": {"description": "Number of ingestor pods."},
+                "env": {
+                  "description": "Environment variables passed to each ingestor container.",
+                  "properties": {
+                    "RUST_LOG": {"description": "Rust log verbosity, for example warn or info."}
+                  }
+                },
+                "resources": {
+                  "description": "Kubernetes CPU and memory resources for each ingestor.",
+                  "properties": {
+                    "requests": {
+                      "description": "CPU and memory reserved for scheduling each ingestor.",
+                      "properties": {
+                        "cpu": {"description": "Requested CPU, for example 1 or 500m."},
+                        "memory": {"description": "Requested memory, for example 0.5Gi."}
+                      }
+                    },
+                    "limits": {
+                      "description": "Maximum CPU and memory allowed for each ingestor.",
+                      "properties": {
+                        "cpu": {"description": "CPU limit, for example 1 or 500m."},
+                        "memory": {"description": "Memory limit, for example 0.5Gi."}
+                      }
+                    }
+                  }
+                },
+                "persistence": {
+                  "description": "Local disk settings for each ingestor.",
+                  "properties": {
+                    "staging": {
+                      "description": "Staging area for incoming events before object-store upload; uses a PVC when enabled, otherwise emptyDir.",
+                      "properties": {
+                        "enabled": {"description": "Create a staging PVC for each ingestor when true."},
+                        "storageClass": {"description": "Kubernetes StorageClass for staging PVCs; empty uses the cluster default."},
+                        "accessMode": {"description": "Kubernetes PVC access mode, for example ReadWriteOnce."},
+                        "size": {"description": "Staging PVC size for each ingestor, for example 5Gi."}
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "querier": {
+              "type": "object",
+              "description": "Distributed query node settings.",
+              "properties": {
+                "replicas": {"description": "Number of querier pods. Enterprise can use multiple queriers behind Prism."},
+                "env": {
+                  "description": "Environment variables passed to each querier container.",
+                  "properties": {
+                    "RUST_LOG": {"description": "Rust log verbosity, for example warn or info."}
+                  }
+                },
+                "resources": {
+                  "description": "Kubernetes CPU and memory resources for each querier.",
+                  "properties": {
+                    "requests": {
+                      "description": "CPU and memory reserved for scheduling each querier.",
+                      "properties": {
+                        "cpu": {"description": "Requested CPU, for example 1 or 500m."},
+                        "memory": {"description": "Requested memory, for example 0.5Gi."}
+                      }
+                    },
+                    "limits": {
+                      "description": "Maximum CPU and memory allowed for each querier.",
+                      "properties": {
+                        "cpu": {"description": "CPU limit, for example 1 or 500m."},
+                        "memory": {"description": "Memory limit, for example 0.5Gi."}
+                      }
+                    }
+                  }
+                },
+                "persistence": {
+                  "type": "object",
+                  "description": "Local persistence for each distributed querier.",
+                  "not": {
+                    "required": [
+                      "smartCache"
+                    ]
+                  },
+                  "properties": {
+                    "hotTier": {
+                      "type": "object",
+                      "description": "Enterprise querier hot-tier disk. Each querier uses a PVC when enabled and emptyDir when disabled; ignored for OSS.",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean",
+                          "description": "Create a persistent volume for each Enterprise querier's hot tier when true."
+                        },
+                        "storageClass": {
+                          "type": "string",
+                          "description": "Kubernetes StorageClass for the hot-tier PVC; an empty value uses the cluster default."
+                        },
+                        "accessMode": {
+                          "type": "string",
+                          "description": "Kubernetes access mode for the hot-tier PVC, for example ReadWriteOnce."
+                        },
+                        "size": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Requested hot-tier PVC size for each Enterprise querier, for example 50Gi."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "prism": {
+              "description": "Enterprise Prism node settings for the UI and API entry point.",
+              "properties": {
+                "replicas": {"description": "Number of Prism pods."},
+                "env": {
+                  "description": "Environment variables passed to each Prism container.",
+                  "properties": {
+                    "RUST_LOG": {"description": "Rust log verbosity, for example warn or info."}
+                  }
+                },
+                "resources": {
+                  "description": "Kubernetes CPU and memory resources for each Prism.",
+                  "properties": {
+                    "requests": {
+                      "description": "CPU and memory reserved for scheduling each Prism.",
+                      "properties": {
+                        "cpu": {"description": "Requested CPU, for example 1 or 500m."},
+                        "memory": {"description": "Requested memory, for example 0.5Gi."}
+                      }
+                    },
+                    "limits": {
+                      "description": "Maximum CPU and memory allowed for each Prism.",
+                      "properties": {
+                        "cpu": {"description": "CPU limit, for example 1 or 500m."},
+                        "memory": {"description": "Memory limit, for example 2Gi."}
+                      }
+                    }
+                  }
+                },
+                "persistence": {
+                  "description": "Optional persistent volume for Prism's own local state.",
+                  "properties": {
+                    "enabled": {"description": "Create a PVC for Prism's local state when true."},
+                    "storageClass": {"description": "Kubernetes StorageClass for Prism's state PVC; empty uses the cluster default."},
+                    "accessMode": {"description": "Kubernetes access mode for Prism's state PVC, for example ReadWriteOnce."},
+                    "size": {"description": "Requested size of each Prism state PVC, for example 5Gi."}
+                  }
+                },
+                "cache": {
+                  "description": "Separate disk for Prism's PromQL results cache; uses a PVC when enabled and emptyDir otherwise.",
+                  "properties": {
+                    "enabled": {"description": "Create a PVC for Prism's PromQL results cache when true."},
+                    "storageClass": {"description": "Kubernetes StorageClass for Prism's cache PVC; empty uses the cluster default."},
+                    "accessMode": {"description": "Kubernetes access mode for Prism's cache PVC, for example ReadWriteOnce."},
+                    "size": {"description": "Requested size of each Prism cache PVC, for example 5Gi."}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

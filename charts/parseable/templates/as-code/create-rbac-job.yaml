@@ -1,0 +1,410 @@
+{{- $p := .Values.parseable }}
+{{- if hasKey $p "roles" }}
+{{- $datasetsSpecified := hasKey $p "datasets" }}
+{{- $desiredDatasets := list }}
+{{- if $datasetsSpecified }}
+  {{- range $dataset := $p.datasets }}
+    {{- $desiredDatasets = append $desiredDatasets $dataset.name }}
+  {{- end }}
+{{- end }}
+{{- $roleNames := dict }}
+{{- $defaultOidcRole := "" }}
+{{- range $role := $p.roles }}
+  {{- if not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9]|[._@-][A-Za-z0-9])+$" $role.name) }}
+    {{- fail (printf "role name %q is invalid: use letters or digits at both ends; '.', '_', '@', '-' cannot appear together (e.g. payment-logs-editor)" $role.name) }}
+  {{- end }}
+  {{- if hasKey $roleNames $role.name }}
+    {{- fail (printf "roles: name %q appears more than once; keep one role entry and combine its privileges" $role.name) }}
+  {{- end }}
+  {{- $_ := set $roleNames $role.name true }}
+  {{- if $role.defaultOidcRole }}
+    {{- if $defaultOidcRole }}
+      {{- fail (printf "roles: only one role can have defaultOidcRole: true (%q and %q)" $defaultOidcRole $role.name) }}
+    {{- end }}
+    {{- $defaultOidcRole = $role.name }}
+  {{- end }}
+  {{- $seen := dict }}
+  {{- $wildcards := dict }}
+  {{- $named := dict }}
+  {{- range $entry := $role.privileges }}
+    {{- $privilege := $entry.privilege }}
+    {{- if or (eq $privilege "admin") (eq $privilege "editor") }}
+      {{- if hasKey $entry "resource" }}
+        {{- fail (printf "role %q: %s privilege must not have resource; remove resource" $role.name $privilege) }}
+      {{- end }}
+      {{- if hasKey $seen $privilege }}
+        {{- fail (printf "role %q: duplicate %s privilege; keep it only once" $role.name $privilege) }}
+      {{- end }}
+      {{- $_ := set $seen $privilege true }}
+    {{- else }}
+      {{- if not (hasKey $entry "resource") }}
+        {{- fail (printf "role %q: %s privilege requires resource.dataset (a dataset name, a list of names, or all)" $role.name $privilege) }}
+      {{- end }}
+      {{- if or (not (hasKey $entry.resource "dataset")) (ne (len $entry.resource) 1) }}
+        {{- fail (printf "role %q: %s resource must contain only dataset (a name, a list of names, or all)" $role.name $privilege) }}
+      {{- end }}
+      {{- if not (or (kindIs "string" $entry.resource.dataset) (kindIs "slice" $entry.resource.dataset)) }}
+        {{- fail (printf "role %q: %s resource.dataset must be a dataset name or a list of names; use all for every dataset" $role.name $privilege) }}
+      {{- end }}
+      {{- $datasets := list $entry.resource.dataset }}
+      {{- if kindIs "slice" $entry.resource.dataset }}
+        {{- $datasets = $entry.resource.dataset }}
+        {{- if eq (len $datasets) 0 }}
+          {{- fail (printf "role %q: %s resource.dataset list cannot be empty; use privileges: [] to remove permissions" $role.name $privilege) }}
+        {{- end }}
+      {{- end }}
+      {{- range $dataset := $datasets }}
+        {{- if or (not (kindIs "string" $dataset)) (eq (printf "%v" $dataset) "") }}
+          {{- fail (printf "role %q: %s resource.dataset entries must be nonempty dataset names" $role.name $privilege) }}
+        {{- end }}
+        {{- if eq $dataset "*" }}
+          {{- fail (printf "role %q: %s resource.dataset must use all for every dataset (not *)" $role.name $privilege) }}
+        {{- end }}
+        {{- if and (eq (lower $dataset) "all") (not (has $dataset (list "all" "All" "ALL"))) }}
+          {{- fail (printf "role %q: %s resource.dataset must use all, All, or ALL for every dataset" $role.name $privilege) }}
+        {{- end }}
+        {{- $all := eq (lower $dataset) "all" }}
+        {{- if and $all (gt (len $datasets) 1) }}
+          {{- fail (printf "role %q: %s resource.dataset: all must be the only dataset in the list" $role.name $privilege) }}
+        {{- end }}
+        {{- $canonical := $dataset }}
+        {{- if $all }}{{- $canonical = "*" }}{{- end }}
+        {{- $key := printf "%s|%s" $privilege $canonical }}
+        {{- if hasKey $seen $key }}
+          {{- fail (printf "role %q: duplicate %s privilege for dataset %q; keep it only once" $role.name $privilege $dataset) }}
+        {{- end }}
+        {{- $_ := set $seen $key true }}
+        {{- if $all }}
+          {{- if hasKey $named $privilege }}
+            {{- fail (printf "role %q: %s for all datasets cannot be combined with %s for named datasets" $role.name $privilege $privilege) }}
+          {{- end }}
+          {{- $_ := set $wildcards $privilege true }}
+        {{- else }}
+          {{- if and $datasetsSpecified (not (has $dataset $desiredDatasets)) }}
+            {{- fail (printf "role %q: dataset %q is not in parseable.datasets; available: %s. Add it to datasets or use resource.dataset: all" $role.name $dataset (join ", " $desiredDatasets | default "(none)")) }}
+          {{- end }}
+          {{- if hasKey $wildcards $privilege }}
+            {{- fail (printf "role %q: %s for all datasets cannot be combined with %s for named datasets" $role.name $privilege $privilege) }}
+          {{- end }}
+          {{- $_ := set $named $privilege true }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- $fullname := include "parseable.fullname" . }}
+{{- $target := printf "%s-querier-service" $fullname }}
+{{- if eq $p.deploymentMode "standalone" }}
+{{- $target = printf "%s-standalone-service" $fullname }}
+{{- else if $p.enterprise.enabled }}
+{{- $target = printf "%s-prism-service" $fullname }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-rbac
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+data:
+  roles.json: |-
+    {{ toJson $p.roles }}
+  reconcile-roles.py: |-
+    import base64
+    import json
+    import os
+    import sys
+    from urllib.error import HTTPError, URLError
+    from urllib.parse import quote
+    from urllib.request import Request, urlopen
+
+    base = os.environ["PARSEABLE_BASE_URL"].rstrip("/")
+    credentials = f'{os.environ["P_USERNAME"]}:{os.environ["P_PASSWORD"]}'
+    authorization = base64.b64encode(credentials.encode()).decode()
+    headers = {"Authorization": f"Basic {authorization}"}
+
+    def request(method, path, payload=None):
+        body = None if payload is None else json.dumps(payload).encode()
+        request_headers = dict(headers)
+        if body is not None:
+            request_headers["Content-Type"] = "application/json"
+        req = Request(base + path, data=body, headers=request_headers, method=method)
+        try:
+            with urlopen(req, timeout=30) as response:
+                content = response.read()
+                return json.loads(content) if content else None
+        except HTTPError as error:
+            detail = error.read(2048).decode(errors="replace")
+            raise RuntimeError(f"HTTP {error.code}: {detail}") from error
+        except URLError as error:
+            raise RuntimeError(str(error.reason)) from error
+
+    with open("/scripts/roles.json", encoding="utf-8") as file:
+        desired_roles = json.load(file)
+    phase = os.environ.get("ROLE_RECONCILE_PHASE", "apply")
+
+    try:
+        current_roles = request("GET", "/api/v1/roles")
+        if not isinstance(current_roles, dict):
+            raise RuntimeError("GET /api/v1/roles returned an unexpected response")
+    except RuntimeError as error:
+        print(f"ERROR listing roles: {error}", file=sys.stderr)
+        sys.exit(1)
+
+    if phase == "prune":
+        desired_names = {role["name"] for role in desired_roles}
+        stale_roles = sorted(set(current_roles) - desired_names)
+        if not stale_roles:
+            print("No roles to delete.")
+            sys.exit(0)
+        errors = 0
+        for name in stale_roles:
+            try:
+                request("DELETE", f"/api/v1/role/{quote(name, safe='')}")
+                print(f"role={name} deleted", flush=True)
+            except RuntimeError as error:
+                detail = str(error)
+                if "role is assigned to an existing user" in detail:
+                    detail += "; remove this role from users and groups before deleting it"
+                print(
+                    f"ERROR role={name}: {detail}",
+                    file=sys.stderr,
+                )
+                errors += 1
+        if errors:
+            print(f"Role deletion finished with {errors} error(s).", file=sys.stderr)
+            sys.exit(1)
+        print(f"Deleted {len(stale_roles)} role(s).")
+        sys.exit(0)
+
+    if phase != "apply":
+        print(f"ERROR unknown role reconciliation phase: {phase}", file=sys.stderr)
+        sys.exit(1)
+
+    def expand_privileges(role):
+        expanded = []
+        for rule in role["privileges"]:
+            privilege = rule["privilege"]
+            if privilege in ("admin", "editor"):
+                if "resource" in rule:
+                    raise ValueError(f"{privilege} must not have a resource")
+                expanded.append({"privilege": privilege})
+                continue
+            resource = rule.get("resource")
+            if not isinstance(resource, dict) or set(resource) != {"dataset"}:
+                raise ValueError(f"{privilege} requires resource.dataset")
+            datasets = resource["dataset"]
+            if isinstance(datasets, str):
+                datasets = [datasets]
+            if not isinstance(datasets, list) or not datasets:
+                raise ValueError("resource.dataset needs one or more names")
+            if len(datasets) == 1 and isinstance(datasets[0], str) and datasets[0].lower() == "all":
+                expanded.append({"privilege": privilege, "resource": {"stream": "*"}})
+                continue
+            for dataset in datasets:
+                if not isinstance(dataset, str) or not dataset or dataset == "*":
+                    raise ValueError("resource.dataset needs named datasets or all")
+                if dataset.lower() == "all":
+                    raise ValueError("resource.dataset all must be the only dataset")
+                expanded.append({"privilege": privilege, "resource": {"stream": dataset}})
+        return expanded
+
+    errors = 0
+    seen = set()
+    planned_roles = []
+    for role in desired_roles:
+        name = role["name"]
+        if name in seen:
+            print(f"ERROR duplicate role name: {name}", file=sys.stderr)
+            errors += 1
+            continue
+        seen.add(name)
+        try:
+            privileges = expand_privileges(role)
+        except ValueError as error:
+            print(f"ERROR role={name}: {error}", file=sys.stderr)
+            errors += 1
+            continue
+        planned_roles.append((name, privileges))
+
+    if errors:
+        print(f"Role validation failed with {errors} error(s); no roles were changed.", file=sys.stderr)
+        sys.exit(1)
+
+    named_datasets = set()
+    for _, privileges in planned_roles:
+        for entry in privileges:
+            resource = entry.get("resource")
+            if resource and resource["stream"] != "*":
+                named_datasets.add(resource["stream"])
+
+    if named_datasets:
+        try:
+            listed_datasets = request("GET", "/api/v1/logstream")
+            if not isinstance(listed_datasets, list) or any(
+                not isinstance(item, dict) or not isinstance(item.get("name"), str)
+                for item in listed_datasets
+            ):
+                raise RuntimeError("GET /api/v1/logstream returned an unexpected response")
+        except RuntimeError as error:
+            print(f"ERROR listing datasets: {error}; no roles were changed.", file=sys.stderr)
+            sys.exit(1)
+
+        available_datasets = sorted({item["name"] for item in listed_datasets})
+        available_set = set(available_datasets)
+        for name, privileges in planned_roles:
+            requested = {
+                entry["resource"]["stream"]
+                for entry in privileges
+                if "resource" in entry and entry["resource"]["stream"] != "*"
+            }
+            missing = sorted(requested - available_set)
+            if missing:
+                print(
+                    f"ERROR role={name}: unknown dataset(s): {', '.join(missing)}. "
+                    f"Available datasets: {', '.join(available_datasets) or '(none)'}. "
+                    "Use resource.dataset: all for all datasets.",
+                    file=sys.stderr,
+                )
+                errors += 1
+
+    if errors:
+        print(f"Role validation failed with {errors} error(s); no roles were changed.", file=sys.stderr)
+        sys.exit(1)
+
+    for name, privileges in planned_roles:
+        if current_roles.get(name) == privileges:
+            print(f"role={name} unchanged")
+            continue
+        try:
+            request("PUT", f"/api/v1/role/{quote(name, safe='')}", privileges)
+            print(f"role={name} applied")
+        except RuntimeError as error:
+            print(f"ERROR role={name}: {error}", file=sys.stderr)
+            errors += 1
+
+    if errors:
+        print(f"Role reconciliation finished with {errors} error(s).", file=sys.stderr)
+        sys.exit(1)
+
+    default_oidc_roles = [role["name"] for role in desired_roles if role.get("defaultOidcRole")]
+    if default_oidc_roles:
+        desired_default = default_oidc_roles[0]
+        try:
+            current_default = request("GET", "/api/v1/role/default")
+            if current_default != desired_default:
+                request("PUT", "/api/v1/role/default", desired_default)
+                confirmed_default = request("GET", "/api/v1/role/default")
+                if confirmed_default != desired_default:
+                    raise RuntimeError(f"default OIDC role did not change to {desired_default}")
+                print(f"default OIDC role={desired_default} applied")
+            else:
+                print(f"default OIDC role={desired_default} unchanged")
+        except RuntimeError as error:
+            print(f"ERROR setting default OIDC role={desired_default}: {error}", file=sys.stderr)
+            sys.exit(1)
+    print("Role reconciliation completed successfully.")
+{{- if gt (len $p.roles) 0 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-rbac
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-output-log-policy": hook-failed
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 240
+  template:
+    metadata:
+      labels:
+        {{- include "parseable.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml $p.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: script
+          configMap:
+            name: {{ $fullname }}-rbac
+      containers:
+        - name: reconcile-roles
+          image: docker.io/library/python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/scripts/reconcile-roles.py"]
+          env:
+            - name: PARSEABLE_BASE_URL
+              value: {{ printf "http://%s.%s" $target .Release.Namespace | quote }}
+            - name: P_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: username
+            - name: P_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: password
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-rbac-prune
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "40"
+    "helm.sh/hook-output-log-policy": hook-failed
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 240
+  template:
+    metadata:
+      labels:
+        {{- include "parseable.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml $p.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: script
+          configMap:
+            name: {{ $fullname }}-rbac
+      containers:
+        - name: prune-roles
+          image: docker.io/library/python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/scripts/reconcile-roles.py"]
+          env:
+            - name: ROLE_RECONCILE_PHASE
+              value: prune
+            - name: PARSEABLE_BASE_URL
+              value: {{ printf "http://%s.%s" $target .Release.Namespace | quote }}
+            - name: P_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: username
+            - name: P_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: password
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+{{- end }}
