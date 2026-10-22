@@ -98,6 +98,21 @@ parseable:
             memory: 32Mi
 ```
 
+The same readiness-wait init containers run the image set under `waitImage`
+(`docker.io/curlimages/curl`, pinned to a release rather than `latest`), and
+take a container security context under `initContainer.securityContext` beside
+`resources`. The default meets the Pod Security `restricted` profile: no
+privilege escalation, a read-only root filesystem, every capability dropped,
+the `RuntimeDefault` seccomp profile, and the image's own non-root user by its
+numeric id. To pull the image from a mirror:
+
+```yaml
+parseable:
+  waitImage:
+    repository: registry.example.com/mirror/curlimages/curl
+    tag: "8.23.0"
+```
+
 ```sh
 kubectl create namespace parseable
 ```
