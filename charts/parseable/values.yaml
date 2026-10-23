@@ -402,67 +402,26 @@ parseable:
   ## Enterprise querier hot-tier volume must have enough usable disk space.
   ## Omit datasets to leave them untouched; set datasets: [] to delete all datasets.
 
-  ## Parseable roles to reconcile after datasets are ready.
-  ## Existing roles are updated only when their privileges change.
-  ## When roles is present, omitted roles are deleted after API keys, users,
-  ## and groups reconcile. Omit roles entirely to leave every role untouched.
-  ##   - name: application-logs-reader
-  ##     defaultOidcRole: true # Optional; at most one role. Omit to keep the current default.
-  ##     privileges:
-  ##       - privilege: reader
-  ##         resource:
-  ##           dataset: application-logs
-  ## reader/writer/ingestor accept a dataset name, list of names, or all.
-  ## Use dataset: all or dataset: [ALL] for all datasets.
-  ## admin/editor have no resource; LLM key scopes are not supported yet.
-  ## Backend wildcard authorization may also match LLM resources; see README.
-  ## roles: [] deletes all user-defined roles. Roles still assigned to users or groups cannot
-  ## be deleted until those assignments are removed.
-
-  ## Create native users after roles and API keys are ready.
-  ## Use secretKeyRef for a caller-provided password. Omit it to let Parseable
-  ## generate a password; the new password is printed once in Helm output.
-  ## Generated passwords also appear in Job and CI logs; save them securely.
-  ## Existing users keep their password; only their direct roles are reconciled.
-  ## Each user needs at least one role to log in; roles: [] is rejected.
-  ## Caller-provided passwords must differ, even across Secret fields.
-  ## When users is present, only listed native users are kept. Other native
-  ## and OAuth users are deleted after reconciliation succeeds. Protected
-  ## internal users and API-key-backed users are not deleted by this Job.
-  ## Omit users to leave them untouched; users: [] deletes all deletable users.
-  ##   - name: application-logs-user
-  ##     roles: [application-logs-reader]
-  ##     secretKeyRef:
-  ##       name: parseable-user-passwords
-  ##       key: APPLICATION_LOGS_PASSWORD
-  ##   - name: generated-user
-  ##     roles: [application-logs-reader]
-
-  ## Enterprise user groups run after users. Group members inherit its roles.
-  ## users lists native Parseable usernames; existing OAuth members can be removed.
-  ## A present groups list is authoritative: groups omitted from it are deleted.
-  ## Omit groups to leave them untouched; groups: [] deletes all groups.
-  ##   - name: application-logs-team
-  ##     roles: [application-logs-reader]
-  ##     users: [application-logs-user]
-
-  ## Register API keys after datasets and roles are ready. Use secretKeyRef for
+  ## Register API keys after datasets are ready. Set apiKeyType to ingestor for
+  ## global ingest access or query for the reader privilege on all datasets.
+  ## apiKeyType is required for every API key. Use secretKeyRef for
   ## a caller-provided key, or omit it to let Parseable generate a key. Newly
   ## generated keys are printed once in Helm output and also appear in Job and
   ## CI logs; save them securely. Never put key values directly in values.yaml.
   ## Secret values must be hyphenated UUID v4 strings.
-  ## Existing matching keys are left unchanged. Changed roles are reconciled
-  ## through the user-role API; roles: [] removes all assigned roles.
-  ## A changed API key value fails safely because no key-rotation route exists.
+  ## Existing matching keys are left unchanged if they already have the
+  ## server-managed role for their apiKeyType. Other keys need explicit replacement.
+  ## Existing key values can be rotated. A value swap uses a temporary key
+  ## value and can be resumed by rerunning Helm if an update fails.
   ## When apiKeys is present, keys omitted from the list are revoked.
   ## Omit apiKeys to leave them untouched; set apiKeys: [] to revoke all API keys.
   ##   - name: application-logs-key
-  ##     roles: [application-logs-reader]
+  ##     apiKeyType: ingestor
   ##     secretKeyRef:
   ##       name: parseable-api-keys
   ##       key: LOGS_KEY
   ##   - name: generated-key
-  ##     roles: [application-logs-reader]
+  ##     apiKeyType: query
 
   ## ServiceMonitor for this Parseable deployment. Read more on ServiceMonitor
   ## here: https://prometheus-operator.dev/docs/api-reference/api/#monitoring.coreos.com/v1.ServiceMonitor

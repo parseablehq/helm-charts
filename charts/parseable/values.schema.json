@@ -166,84 +166,16 @@
             "additionalProperties": false
           }
         },
-        "users": {
-          "type": "array",
-          "description": "Native users managed by this release. Omit to leave users unchanged; use [] to delete all deletable users.",
-          "items": {
-            "type": "object",
-            "description": "One native user and the roles assigned directly to them.",
-            "required": ["name", "roles"],
-            "properties": {
-              "name": {
-                "type": "string",
-                "minLength": 3,
-                "maxLength": 64,
-                "description": "Parseable username, 3 to 64 characters. Letters and digits are required at both ends."
-              },
-              "roles": {
-                "type": "array",
-                "description": "Roles assigned directly to this user. At least one is required so the user can log in.",
-                "uniqueItems": true,
-                "items": {"type": "string", "minLength": 1, "description": "Name of an existing or configured role."}
-              },
-              "secretKeyRef": {
-                "type": "object",
-                "description": "Optional Kubernetes Secret field containing the user's password. Omit to generate a password for a new user and print it on terminal.",
-                "required": ["name", "key"],
-                "properties": {
-                  "name": {"type": "string", "minLength": 1, "description": "Kubernetes Secret name in this release's namespace."},
-                  "key": {"type": "string", "minLength": 1, "description": "Field in the Secret containing this user's password."}
-                },
-                "additionalProperties": false
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "groups": {
-          "type": "array",
-          "description": "Enterprise user groups managed by this release. Omit to leave groups unchanged; use [] to delete all groups.",
-          "items": {
-            "type": "object",
-            "description": "One group whose members inherit its roles.",
-            "required": ["name", "roles", "users"],
-            "properties": {
-              "name": {
-                "type": "string",
-                "minLength": 1,
-                "description": "Group name. Use only letters, digits, hyphens, or underscores."
-              },
-              "roles": {
-                "type": "array",
-                "description": "Roles inherited by this group's members.",
-                "uniqueItems": true,
-                "items": {"type": "string", "minLength": 1, "description": "Name of an existing or configured role."}
-              },
-              "users": {
-                "type": "array",
-                "description": "Native Parseable usernames to include in this group.",
-                "uniqueItems": true,
-                "items": {"type": "string", "minLength": 1, "description": "Username of a native Parseable user."}
-              }
-            },
-            "additionalProperties": false
-          }
-        },
         "apiKeys": {
           "type": "array",
           "description": "API keys managed by this release. Omit to leave keys unchanged; use [] to revoke all API keys.",
           "items": {
             "type": "object",
-            "description": "One named API key and its assigned roles.",
-            "required": ["name", "roles"],
+            "description": "One named API key with a server-managed ingestor or all-datasets reader role.",
+            "required": ["name", "apiKeyType"],
             "properties": {
               "name": {"type": "string", "minLength": 1, "description": "Unique API key name. Use only letters, digits, hyphens, or underscores."},
-              "roles": {
-                "type": "array",
-                "description": "Roles assigned to this API key. Use [] to remove all assigned roles.",
-                "uniqueItems": true,
-                "items": {"type": "string", "minLength": 1, "description": "Name of an existing or configured role."}
-              },
+              "apiKeyType": {"type": "string", "enum": ["ingestor", "query"], "description": "Required. ingestor can ingest into all datasets; query gets the reader privilege on all datasets."},
               "secretKeyRef": {
                 "type": "object",
                 "description": "Optional Kubernetes Secret field containing a caller-supplied UUID v4 API key. Omit to generate a key for a new entry and print it once in Helm output.",
@@ -253,62 +185,6 @@
                   "key": {"type": "string", "minLength": 1, "description": "Field in the Secret containing this API key value."}
                 },
                 "additionalProperties": false
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "roles": {
-          "type": "array",
-          "description": "Roles managed by this release. Omit to leave roles unchanged; use [] to delete all user-defined roles after their assignments are removed.",
-          "items": {
-            "type": "object",
-            "description": "One named role and its privileges.",
-            "required": ["name", "privileges"],
-            "properties": {
-              "name": {
-                "type": "string",
-                "minLength": 3,
-                "maxLength": 64,
-                "description": "Role name, 3 to 64 characters. Letters and digits are required at both ends."
-              },
-              "defaultOidcRole": {
-                "type": "boolean",
-                "description": "Mark this as the default OIDC role. At most one role may set this to true; omit to keep the current default."
-              },
-              "privileges": {
-                "type": "array",
-                "description": "Permissions granted by this role. Use [] to remove all privileges while keeping the role.",
-                "items": {
-                  "type": "object",
-                  "description": "One privilege and, when required, its dataset resource.",
-                  "required": [
-                    "privilege"
-                  ],
-                  "properties": {
-                    "privilege": {
-                      "type": "string",
-                      "description": "admin and editor are global and have no resource. ingestor, reader, and writer require resource.dataset.",
-                      "enum": [
-                        "ingestor",
-                        "reader",
-                        "writer",
-                        "admin",
-                        "editor"
-                      ]
-                    },
-                    "resource": {
-                      "type": "object",
-                      "description": "Dataset scope for ingestor, reader, or writer. Do not set this for admin or editor.",
-                      "properties": {
-                        "dataset": {
-                          "description": "One dataset name, a list of names, or all to grant this privilege on every dataset."
-                        }
-                      }
-                    }
-                  },
-                  "additionalProperties": false
-                }
               }
             },
             "additionalProperties": false

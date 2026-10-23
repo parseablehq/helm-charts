@@ -67,18 +67,3 @@
   {{- fail (printf "dataset %q: smartCache requires parseable.enterprise.enabled: true" $ds.name) -}}
 {{- end -}}
 {{- end -}}
-
-{{/* Validate references when this release explicitly declares roles. */}}
-{{- define "parseable.validateRoleReferences" -}}
-{{- $known := list -}}
-{{- range $role := .roles -}}
-  {{- $known = append $known $role.name -}}
-{{- end -}}
-{{- range $item := .items -}}
-  {{- range $role := $item.roles -}}
-    {{- if not (has $role $known) -}}
-      {{- fail (printf "%s %q: role %q is not listed in parseable.roles; available: %s. Fix the name or add that role" $.kind $item.name $role (join ", " $known | default "(none)")) -}}
-    {{- end -}}
-  {{- end -}}
-{{- end -}}
-{{- end -}}

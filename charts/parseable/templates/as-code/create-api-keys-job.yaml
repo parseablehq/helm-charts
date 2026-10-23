@@ -3,13 +3,16 @@
   {{- fail "parseable.apikeys is not supported; use parseable.apiKeys (capital K)" }}
 {{- end }}
 {{- if hasKey $p "apiKeys" }}
-{{- if and (hasKey $p "roles") $p.apiKeys }}
-  {{- include "parseable.validateRoleReferences" (dict "kind" "apiKeys" "items" $p.apiKeys "roles" $p.roles) }}
-{{- end }}
 {{- $seen := dict }}
 {{- $seenValues := dict }}
 {{- $showGeneratedCredentials := false }}
 {{- range $key := $p.apiKeys }}
+  {{- if not (hasKey $key "apiKeyType") }}
+    {{- fail (printf "apiKeys name=%s: apiKeyType is required; set it to ingestor or query" $key.name) }}
+  {{- end }}
+  {{- if not (has $key.apiKeyType (list "ingestor" "query")) }}
+    {{- fail (printf "apiKeys name=%s: apiKeyType must be ingestor or query" $key.name) }}
+  {{- end }}
   {{- if not (regexMatch "^[A-Za-z0-9_-]+$" $key.name) }}
     {{- fail (printf "API key name %q is invalid: use only letters, digits, '-' or '_' without spaces (e.g. payment-key)" $key.name) }}
   {{- end }}
@@ -28,8 +31,8 @@
     {{- fail (printf "apiKeys name=%s: Secret %s has no %s field or it is empty" $key.name $key.secretKeyRef.name $key.secretKeyRef.key) }}
   {{- end }}
   {{- $value := b64dec $encoded }}
-  {{- if or (ne (len $value) 36) (not (regexMatch "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" $value)) }}
-    {{- fail (printf "apiKeys name=%s: Secret %s field %s must contain a UUID v4 in 8-4-4-4-12 format (no spaces or newline)" $key.name $key.secretKeyRef.name $key.secretKeyRef.key) }}
+  {{- if or (ne (len $value) 36) (not (regexMatch "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$" $value)) }}
+    {{- fail (printf "apiKeys name=%s: Secret %s field %s must contain an RFC 4122 UUID v4 in 8-4-4-4-12 format (no spaces or newline)" $key.name $key.secretKeyRef.name $key.secretKeyRef.key) }}
   {{- end }}
   {{- if hasKey $seenValues $value }}
     {{- fail (printf "apiKeys name=%s: Secret value duplicates API key %s" $key.name (get $seenValues $value)) }}
@@ -63,6 +66,7 @@ data:
     import re
     import signal
     import sys
+    from uuid import uuid4
     from urllib.error import HTTPError, URLError
     from urllib.parse import quote
     from urllib.request import Request, urlopen
@@ -72,13 +76,15 @@ data:
         f'{os.environ["P_USERNAME"]}:{os.environ["P_PASSWORD"]}'.encode()
     ).decode()
     PATH = "/api/prism/v1/apikeys"
-    UUID_V4 = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+    API_KEY_ROLES = {"ingestor": "__global_ingestor__", "query": "__global_querier__"}
+    UUID_V4 = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")
 
     class ReconcileError(Exception):
         pass
 
     changes = {"created": 0, "updated": 0, "deleted": 0}
     generated_credentials = []
+    temporary_rotations = set()
 
     def show_generated_credentials():
         if generated_credentials:
@@ -93,10 +99,12 @@ data:
 
     def report_error(error):
         parts = [f"ERROR: {error}"]
-        if any(changes[kind] for kind in ("created", "updated", "deleted")):
+        if any(changes.values()):
             parts.append("API keys: " + ", ".join(
                 f"{kind}={changes[kind]}" for kind in ("created", "updated", "deleted") if changes[kind]
             ))
+        if temporary_rotations:
+            parts.append("temporary rotation remains for " + ", ".join(sorted(temporary_rotations)) + "; rerun Helm to finish")
         print(" | ".join(parts), file=sys.stderr, flush=True)
 
     def request(method, path, payload=None, expect_json=True):
@@ -131,9 +139,11 @@ data:
         errors = []
         for index, item in enumerate(configured):
             name = item["name"]
-            roles = item["roles"]
+            key_type = item["apiKeyType"]
             secret_ref = item.get("secretKeyRef")
             value = os.environ.get(f"API_KEY_{index}") if secret_ref is not None else None
+            if key_type not in API_KEY_ROLES:
+                errors.append(f"name={name}: apiKeyType must be ingestor or query")
             if name in names:
                 errors.append(f"name={name}: duplicate API key name")
             names.add(name)
@@ -144,16 +154,14 @@ data:
                 )
             elif value is not None and not UUID_V4.fullmatch(value):
                 errors.append(
-                    f"name={name}: apiKey must be a UUID v4 in 8-4-4-4-12 format "
+                    f"name={name}: apiKey must be an RFC 4122 UUID v4 in 8-4-4-4-12 format "
                     "(no spaces or newline)"
                 )
             elif value is not None and value in values:
                 errors.append(f"name={name}: API key value is duplicated in apiKeys")
             elif value is not None:
                 values.add(value)
-            if not isinstance(roles, list) or len(roles) != len(set(roles)):
-                errors.append(f"name={name}: roles must be a list without duplicates")
-            desired.append((name, roles, value))
+            desired.append((name, value, key_type))
         if errors:
             raise ReconcileError("; ".join(errors))
         return desired
@@ -184,13 +192,6 @@ data:
                 raise ReconcileError("; ".join(failures))
             return
 
-        known_roles = request("GET", "/api/v1/roles")
-        if not isinstance(known_roles, dict):
-            raise ReconcileError("GET /api/v1/roles returned an unexpected response")
-        missing = sorted({role for _, roles, _ in desired for role in roles} - set(known_roles))
-        if missing:
-            raise ReconcileError(f"unknown role(s): {', '.join(missing)}; create roles first")
-
         listed = request("GET", PATH)
         if not isinstance(listed, list):
             raise ReconcileError("GET /api/prism/v1/apikeys returned an unexpected response")
@@ -206,57 +207,148 @@ data:
             seen_ids.add(item["keyId"])
             existing[item["keyName"]] = item["keyId"]
 
-        # Preflight every key before changing roles or creating new keys.
-        pending = []
-        pending_updates = []
-        for name, roles, value in desired:
-            if name in existing:
-                detail = request("GET", f"{PATH}/{quote(existing[name], safe='')}")
-                if not isinstance(detail, dict) or not isinstance(detail.get("apiKey"), str) or not isinstance(detail.get("roles"), list):
-                    raise ReconcileError(f"name={name}: API key detail has an unexpected response")
-                if value is not None and detail["apiKey"] != value:
-                    raise ReconcileError(
-                        f"name={name}: existing key value differs; "
-                        "rotate it explicitly, then rerun Helm"
-                    )
-                if set(detail["roles"]) != set(roles):
-                    pending_updates.append((name, existing[name], detail["roles"], roles, detail["apiKey"]))
-            else:
-                if value is not None:
-                    validation = request("POST", f"{PATH}/validate", {"apiKey": value})
-                    if not isinstance(validation, dict) or not isinstance(validation.get("valid"), bool):
-                        raise ReconcileError("API key validation returned an unexpected response")
-                    if validation["valid"]:
-                        raise ReconcileError(f"name={name}: this key value already belongs to another API key")
-                pending.append((name, roles, value))
-
-        for name, key_id, current_roles, roles, value in pending_updates:
-            user_path = f"/api/v1/user/{quote(key_id, safe='')}/role"
-            to_remove = sorted(set(current_roles) - set(roles))
-            to_add = sorted(set(roles) - set(current_roles))
-            if to_remove:
-                request("PATCH", f"{user_path}/remove", to_remove, expect_json=False)
-            if to_add:
-                request("PATCH", f"{user_path}/add", to_add, expect_json=False)
+        # Read each current value once, then plan changes independently of YAML order.
+        details = {}
+        owners = {}
+        for existing_name, key_id in existing.items():
             detail = request("GET", f"{PATH}/{quote(key_id, safe='')}")
-            if not isinstance(detail, dict) or detail.get("apiKey") != value or set(detail.get("roles", [])) != set(roles):
-                raise ReconcileError(f"name={name}: roles did not match after update")
-            changes["updated"] += 1
+            if not isinstance(detail, dict) or not isinstance(detail.get("apiKey"), str) or not isinstance(detail.get("roles"), list):
+                raise ReconcileError(f"name={existing_name}: API key detail has an unexpected response")
+            if detail["apiKey"] in owners:
+                raise ReconcileError("existing API keys contain a duplicate value")
+            details[existing_name] = detail
+            owners[detail["apiKey"]] = existing_name
 
-        for name, roles, value in pending:
-            payload = {"keyName": name, "roles": roles}
+        wanted_names = {name for name, _, _ in desired}
+        pending_updates = []
+        pending = []
+        for name, value, key_type in desired:
+            if name in existing:
+                detail = details[name]
+                if set(detail["roles"]) != {API_KEY_ROLES[key_type]}:
+                    current_type = next(
+                        (kind for kind, role in API_KEY_ROLES.items() if set(detail["roles"]) == {role}),
+                        None,
+                    )
+                    raise ReconcileError(
+                        f"name={name}: cannot change apiKeyType from {current_type or 'custom roles'} "
+                        f"to {key_type}; revoke and recreate the key explicitly"
+                    )
+                if value is not None and detail["apiKey"] != value:
+                    pending_updates.append((name, existing[name], value, key_type, None, {"apiKey": value}))
+            elif value is not None and (owner := owners.get(value)) and owner not in wanted_names:
+                # A value retained under a new name identifies a rename.
+                detail = details[owner]
+                if set(detail["roles"]) != {API_KEY_ROLES[key_type]}:
+                    current_type = next(
+                        (kind for kind, role in API_KEY_ROLES.items() if set(detail["roles"]) == {role}),
+                        "custom roles",
+                    )
+                    raise ReconcileError(
+                        f"name={name}: cannot change apiKeyType from {current_type} to {key_type} "
+                        f"while renaming {owner}; revoke and recreate the key explicitly"
+                    )
+                pending_updates.append((name, existing[owner], value, key_type, owner, {"keyName": name}))
+            else:
+                pending.append((name, value, key_type))
+
+        rotations = {update[0] for update in pending_updates if "apiKey" in update[5]}
+        early_deletions = set()
+        for name, _, value, _, old_name, _ in pending_updates:
+            owner = owners.get(value)
+            if owner is not None and owner != (old_name or name) and owner not in rotations:
+                if owner in wanted_names:
+                    raise ReconcileError(f"name={name}: new key value already belongs to API key {owner}")
+                early_deletions.add(owner)
+        for name, value, _ in pending:
+            owner = owners.get(value) if value is not None else None
+            if owner is not None and owner not in rotations:
+                raise ReconcileError(f"name={name}: this key value already belongs to API key {owner}")
+
+        # A key's old value becomes available only after its PATCH succeeds.
+        ordered_updates = []
+        remaining = pending_updates[:]
+        completed_rotations = set()
+        reserved_values = set(owners) | {value for _, value, _ in desired if value is not None}
+        temporary_values = set()
+        while remaining:
+            ready = [update for update in remaining if (
+                "apiKey" not in update[5]
+                or owners.get(update[2]) in (None, update[4] or update[0])
+                or owners.get(update[2]) in completed_rotations
+                or owners.get(update[2]) in early_deletions
+            )]
+            if not ready:
+                # Follow owners to find a cycle, then free one value with a
+                # temporary UUID. This needs one extra PATCH per cycle.
+                rotating = {update[0]: update for update in remaining}
+                cursor = next(iter(rotating))
+                visited = set()
+                while cursor not in visited:
+                    visited.add(cursor)
+                    cursor = owners[rotating[cursor][2]]
+                pivot = rotating[cursor]
+                temporary = str(uuid4())
+                while temporary in reserved_values:
+                    temporary = str(uuid4())
+                reserved_values.add(temporary)
+                temporary_values.add(temporary)
+                ordered_updates.append((pivot[0], pivot[1], temporary, pivot[3], None, {"apiKey": temporary}))
+                completed_rotations.add(pivot[0])
+                continue
+            for update in ready:
+                ordered_updates.append(update)
+                remaining.remove(update)
+                if "apiKey" in update[5]:
+                    completed_rotations.add(update[0])
+
+        # An omitted key may own a value needed by a retained key. Revoke it
+        # before the PATCH; all other omitted keys are revoked at the end.
+        for name in sorted(early_deletions):
+            request("DELETE", f"{PATH}/{quote(existing[name], safe='')}", expect_json=False)
+            del existing[name]
+            changes["deleted"] += 1
+
+        for name, key_id, value, key_type, old_name, payload in ordered_updates:
+            updated = request("PATCH", f"{PATH}/{quote(key_id, safe='')}", payload)
+            if (
+                not isinstance(updated, dict)
+                or updated.get("keyId") != key_id
+                or updated.get("keyName") != name
+                or updated.get("apiKey") != value
+                or not isinstance(updated.get("roles"), list)
+                or set(updated.get("roles", [])) != {API_KEY_ROLES[key_type]}
+            ):
+                raise ReconcileError(f"name={name}: API key did not match after update")
+            changes["updated"] += 1
+            if value in temporary_values:
+                temporary_rotations.add(name)
+            else:
+                temporary_rotations.discard(name)
+            if old_name is not None:
+                del existing[old_name]
+                existing[name] = key_id
+
+        for name, value, key_type in pending:
+            payload = {"keyName": name, "apiKeyType": key_type}
             if value is not None:
                 payload["apiKey"] = value
-            created = request(
-                "POST", PATH, payload,
-            )
+            try:
+                created = request("POST", PATH, payload)
+            except ReconcileError as error:
+                if "HTTP 400" in str(error):
+                    raise ReconcileError(
+                        f"name={name}: server rejected {key_type} API key creation (HTTP 400); "
+                        "deploy the updated Parseable image"
+                    ) from error
+                raise
             accepted = (
                 isinstance(created, dict)
                 and isinstance(created.get("apiKey"), str)
                 and (created["apiKey"] == value if value is not None else bool(UUID_V4.fullmatch(created["apiKey"])))
                 and created.get("keyName") == name
                 and isinstance(created.get("roles"), list)
-                and set(created["roles"]) == set(roles)
+                and set(created["roles"]) == {API_KEY_ROLES[key_type]}
             )
             if not accepted:
                 key_id = created.get("keyId") if isinstance(created, dict) else None
@@ -265,11 +357,11 @@ data:
                         request("DELETE", f"{PATH}/{quote(key_id, safe='')}")
                     except ReconcileError as error:
                         raise ReconcileError(
-                            f"name={name}: server did not honor apiKey or roles "
+                            f"name={name}: server did not honor apiKey or {key_type} role "
                             f"and rollback failed: {error}"
                         ) from error
                 raise ReconcileError(
-                    f"name={name}: server did not honor apiKey or roles; "
+                    f"name={name}: server did not honor apiKey or {key_type} role; "
                     "deploy the updated Parseable image before creating API keys"
                 )
             if value is None:
@@ -277,7 +369,6 @@ data:
                 generated_credentials.append(f"{display_name}={created['apiKey']}")
             changes["created"] += 1
 
-        wanted_names = {name for name, _, _ in desired}
         failures = []
         for name in sorted(set(existing) - wanted_names):
             try:
