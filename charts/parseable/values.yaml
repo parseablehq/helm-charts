@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=./values.schema.json
 ## Parseable Helm chart
 ## Single chart for both OSS and Enterprise editions of Parseable. OSS and
 ## Enterprise ship as separate images (see `image` vs `enterprise.image`
@@ -453,12 +454,48 @@ parseable:
           port: 8000
 
   ## Create datasets and set their retention on install/upgrade.
-  ## datasets is a list of objects, each with a name and retention policy. Example:
+  ## Each dataset requires name, telemetryType, and logSource.
+  ## telemetryType: logs, metrics, traces, events.
+  ## logSource: json, otel-logs, otel-metrics, otel-traces.
+  ## OTel sources require their matching telemetry type. Tags and retention are optional.
+  ## Type and source apply at creation only.
+  ## Enterprise reconciles tags on upgrade; OSS applies tags on creation only.
+  ## Supported tags: agent-observability, k8s-observability,
+  ## database-observability.
+  ## agent-observability requires an otel-traces dataset.
   ##   - name: "sample-dataset"
+  ##     telemetryType: logs
+  ##     logSource: json
+  ##     tags: ["k8s-observability"]
   ##     retention:
-  ##       action: "delete"
-  ##       duration: "30d"
-  datasets: []
+  ##       durationDays: 30d
+  ##     smartCache:
+  ##       size: 10Gi
+  ## Retention accepts 1d to 3650d; 0d or an empty value removes it.
+  ## Smart Cache is Enterprise-only. size must be at least 10Gi; the
+  ## Enterprise querier hot-tier volume must have enough usable disk space.
+  ## Omit datasets to leave them untouched; set datasets: [] to delete all datasets.
+
+  ## Register API keys after datasets are ready. Set apiKeyType to ingestor for
+  ## global ingest access or query for the reader privilege on all datasets.
+  ## apiKeyType is required for every API key. Use secretKeyRef for
+  ## a caller-provided key, or omit it to let Parseable generate a key. Newly
+  ## generated keys are printed once in Helm output and also appear in Job and
+  ## CI logs; save them securely. Never put key values directly in values.yaml.
+  ## Secret values must be hyphenated UUID v4 strings.
+  ## Existing matching keys are left unchanged if they already have the
+  ## server-managed role for their apiKeyType. Other keys need explicit replacement.
+  ## Existing key values can be rotated. A value swap uses a temporary key
+  ## value and can be resumed by rerunning Helm if an update fails.
+  ## When apiKeys is present, keys omitted from the list are revoked.
+  ## Omit apiKeys to leave them untouched; set apiKeys: [] to revoke all API keys.
+  ##   - name: application-logs-key
+  ##     apiKeyType: ingestor
+  ##     secretKeyRef:
+  ##       name: parseable-api-keys
+  ##       key: LOGS_KEY
+  ##   - name: generated-key
+  ##     apiKeyType: query
 
   ## ServiceMonitor for this Parseable deployment. Read more on ServiceMonitor
   ## here: https://prometheus-operator.dev/docs/api-reference/api/#monitoring.coreos.com/v1.ServiceMonitor
