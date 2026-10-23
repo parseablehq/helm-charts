@@ -182,6 +182,15 @@ parseable:
     fsGroup: 1000
     fsGroupChangePolicy: "Always"
 
+  ## Image for the readiness-wait init containers: the ingestor waits for the
+  ## querier (or for prism in Enterprise), and the Enterprise querier waits for
+  ## prism. Pinned so every install pulls the same image; point `repository`
+  ## at a mirror for clusters that cannot reach Docker Hub.
+  waitImage:
+    repository: docker.io/curlimages/curl
+    tag: "8.23.0"
+    pullPolicy: IfNotPresent
+
   ## =========================================================================
   ## Node types
   ## =========================================================================
@@ -245,7 +254,7 @@ parseable:
     ## ingestor (OSS + Enterprise) - receives and stages incoming events.
     ingestor:
       replicas: 3
-      ## Resources for the readiness-wait init container.
+      ## Resources and security context for the readiness-wait init container.
       initContainer:
         resources:
           requests:
@@ -254,6 +263,22 @@ parseable:
           limits:
             cpu: 250m
             memory: 64Mi
+        ## Container security context for the readiness-wait init container.
+        ## The default meets the Pod Security "restricted" profile. The curl
+        ## image runs as the named user curl_user; the numeric ids (uid 100,
+        ## gid 101) let the kubelet verify runAsNonRoot, also on Enterprise
+        ## pods, which set no pod-level user.
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 100
+          runAsGroup: 101
+          capabilities:
+            drop:
+              - ALL
+          seccompProfile:
+            type: RuntimeDefault
       env:
         RUST_LOG: warn
         P_CHECK_UPDATE: "false"
@@ -307,7 +332,8 @@ parseable:
     ## a single querier; Enterprise can run multiple queriers behind prism.
     querier:
       replicas: 1
-      ## Resources for the Enterprise prism readiness-wait init container.
+      ## Resources and security context for the Enterprise prism readiness-wait
+      ## init container.
       initContainer:
         resources:
           requests:
@@ -316,6 +342,22 @@ parseable:
           limits:
             cpu: 250m
             memory: 64Mi
+        ## Container security context for the readiness-wait init container.
+        ## The default meets the Pod Security "restricted" profile. The curl
+        ## image runs as the named user curl_user; the numeric ids (uid 100,
+        ## gid 101) let the kubelet verify runAsNonRoot, also on Enterprise
+        ## pods, which set no pod-level user.
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 100
+          runAsGroup: 101
+          capabilities:
+            drop:
+              - ALL
+          seccompProfile:
+            type: RuntimeDefault
       env:
         RUST_LOG: warn
         P_CHECK_UPDATE: "false"

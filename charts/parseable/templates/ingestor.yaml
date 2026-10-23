@@ -117,7 +117,12 @@ spec:
       # ingestors register against the {{ $waitFor }}, so wait for it to be ready first
       initContainers:
         - name: wait-for-{{ $waitFor }}
-          image: docker.io/curlimages/curl:latest
+          image: {{ include "parseable.waitImage" . | quote }}
+          imagePullPolicy: {{ .Values.parseable.waitImage.pullPolicy }}
+          {{- with $node.initContainer.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with $node.initContainer.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

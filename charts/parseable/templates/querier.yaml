@@ -115,7 +115,12 @@ spec:
       # Enterprise: the querier registers with prism, so wait for it first
       initContainers:
         - name: wait-for-prism
-          image: docker.io/curlimages/curl:latest
+          image: {{ include "parseable.waitImage" . | quote }}
+          imagePullPolicy: {{ .Values.parseable.waitImage.pullPolicy }}
+          {{- with $node.initContainer.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           {{- with $node.initContainer.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

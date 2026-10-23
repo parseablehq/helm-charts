@@ -51,3 +51,11 @@ Name of the service account to use.
 {{- default "default" .Values.parseable.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Image reference for the readiness-wait init containers.
+*/}}
+{{- define "parseable.waitImage" -}}
+{{- $w := .Values.parseable.waitImage -}}
+{{- printf "%s:%s" $w.repository (toString $w.tag) -}}
+{{- end }}
