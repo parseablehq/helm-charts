@@ -423,6 +423,19 @@ parseable:
   ##   - name: generated-key
   ##     apiKeyType: query
 
+  ## Reconcile dashboards from ConfigMaps on each Helm install and upgrade.
+  ## Label each ConfigMap with parseable_dashboard: "1" and put one exported
+  ## dashboard JSON in a .json data field. The ConfigMap metadata.name is the
+  ## dashboard title; a title inside the JSON is ignored.
+  ## Existing dashboards absent from selected ConfigMaps are left unchanged.
+  ## A selector matching no ConfigMaps makes no changes. Omit this block or
+  ## set enabled: false to leave dashboards untouched.
+  ##
+  ##   dashboards:
+  ##     enabled: true
+  ##     label: parseable_dashboard
+  ##     labelValue: "1"
+
   ## ServiceMonitor for this Parseable deployment. Read more on ServiceMonitor
   ## here: https://prometheus-operator.dev/docs/api-reference/api/#monitoring.coreos.com/v1.ServiceMonitor
   metrics:

@@ -190,6 +190,17 @@
             "additionalProperties": false
           }
         },
+        "dashboards": {
+          "type": "object",
+          "description": "Reconcile dashboards from ConfigMaps in this release's namespace matching label=labelValue. Each ConfigMap must contain exactly one .json field; its metadata.name becomes the dashboard title. A selector with no matches makes no changes. Existing dashboards absent from matching ConfigMaps are left unchanged.",
+          "required": ["enabled"],
+          "properties": {
+            "enabled": {"type": "boolean", "description": "Run the dashboard reconciliation Job on Helm install and upgrade. False leaves existing dashboards untouched."},
+            "label": {"type": "string", "minLength": 1, "description": "Kubernetes label key on dashboard ConfigMaps, for example parseable_dashboard."},
+            "labelValue": {"type": "string", "minLength": 1, "description": "Required label value. Only ConfigMaps with label=labelValue are imported."}
+          },
+          "additionalProperties": false
+        },
         "distributed": {
           "type": "object",
           "description": "Settings for distributed Parseable nodes.",
