@@ -1,0 +1,337 @@
+{{- if hasKey .Values.parseable "datasets" }}
+{{- $p := .Values.parseable }}
+{{- $fullname := include "parseable.fullname" . }}
+{{- $target := printf "%s-querier-service" $fullname }}
+{{- if eq $p.deploymentMode "standalone" }}
+{{- $target = printf "%s-standalone-service" $fullname }}
+{{- else if $p.enterprise.enabled }}
+{{- $target = printf "%s-prism-service" $fullname }}
+{{- end }}
+{{- $url := printf "http://%s.%s" $target .Release.Namespace }}
+{{- $desiredNames := list }}
+{{- range $ds := $p.datasets }}
+{{- include "parseable.validateDatasetName" $ds.name }}
+{{- if has $ds.name $desiredNames }}
+{{- fail (printf "dataset %q is listed more than once; keep each dataset name only once" $ds.name) }}
+{{- end }}
+{{- $desiredNames = append $desiredNames $ds.name }}
+{{- include "parseable.validateDatasetCombination" (dict "dataset" $ds "enterpriseEnabled" $p.enterprise.enabled) }}
+{{- if $ds.retention }}
+{{- include "parseable.validateRetentionDuration" (dict "name" $ds.name "duration" $ds.retention.durationDays) }}
+{{- end }}
+{{- if $ds.smartCache }}
+{{- include "parseable.validateSmartCacheSize" (dict "name" $ds.name "size" $ds.smartCache.size) }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-datasets
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+data:
+  reconcile-datasets.py: |-
+    import base64
+    import json
+    import os
+    import sys
+    from urllib.error import HTTPError, URLError
+    from urllib.parse import quote
+    from urllib.request import Request, urlopen
+
+    base = {{ $url | quote }}
+    desired = set({{ toJson $desiredNames }})
+    auth = base64.b64encode(
+        f'{os.environ["P_USERNAME"]}:{os.environ["P_PASSWORD"]}'.encode()
+    ).decode()
+
+    def request(method, path):
+        req = Request(base + path, headers={"Authorization": f"Basic {auth}"}, method=method)
+        try:
+            with urlopen(req, timeout=120 if method == "DELETE" else 30) as response:
+                content = response.read()
+                return json.loads(content) if method == "GET" else None
+        except HTTPError as error:
+            detail = error.read(2048).decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"{method} {path}: HTTP {error.code}: {detail}") from error
+        except (URLError, TimeoutError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"{method} {path}: {error}") from error
+
+    try:
+        listed = request("GET", "/api/v1/logstream")
+        if not isinstance(listed, list) or any(
+            not isinstance(item, dict) or not isinstance(item.get("name"), str)
+            for item in listed
+        ):
+            raise RuntimeError("GET /api/v1/logstream returned an unexpected response")
+        names = sorted({item["name"] for item in listed} - desired)
+        failures = []
+        deleted = 0
+        for name in names:
+            path = f"/api/v1/logstream/{quote(name, safe='')}"
+            try:
+                info = request("GET", f"{path}/info")
+                if not isinstance(info, dict) or info.get("streamType") not in ("UserDefined", "Internal"):
+                    raise RuntimeError(f"GET {path}/info: missing or unknown streamType; refusing to delete")
+                if info["streamType"] == "Internal":
+                    print(f"dataset={name} is internal; skipping", flush=True)
+                    continue
+                print(f"dataset={name} deleting...", flush=True)
+                request("DELETE", path)
+                deleted += 1
+                print(f"dataset={name} deleted", flush=True)
+            except RuntimeError as error:
+                failures.append(f"dataset={name}: {error}")
+        if failures:
+            for failure in failures:
+                print(f"ERROR: {failure}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Deleted {deleted} dataset(s) absent from values; keeping {len(desired)} listed dataset(s).")
+    except RuntimeError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        sys.exit(1)
+  {{- if gt (len $p.datasets) 0 }}
+  create-datasets.sh: |-
+    #!/bin/sh
+    set -u
+    base="{{ $url }}"
+    errors=0
+    failures=""
+    applied=""
+    response_file=$(mktemp)
+    curl_error_file=$(mktemp)
+    trap 'rm -f "$response_file" "$curl_error_file"' EXIT
+
+    record_failure() {
+      dataset="$1"
+      step="$2"
+      detail="$3"
+      failures="${failures}${failures:+ | }ERROR dataset=$dataset step=$step: $detail"
+      errors=$((errors + 1))
+    }
+
+    api_failure() {
+      detail="$3"
+      if [ -s "$response_file" ]; then
+        body=$(head -c 2048 "$response_file" | tr '\r\n' '  ' | tr -s ' ' | sed 's/^ *//; s/ *$//')
+        detail="$detail; API response: $body"
+      fi
+      if [ -s "$curl_error_file" ]; then
+        curl_error=$(tr '\r\n' '  ' < "$curl_error_file" | tr -s ' ' | sed 's/^ *//; s/ *$//')
+        detail="$detail; $curl_error"
+      fi
+      record_failure "$1" "$2" "$detail"
+    }
+
+    run_step() {
+      dataset="$1"
+      step="$2"
+      shift 2
+      : > "$response_file"
+      : > "$curl_error_file"
+      if status=$(curl -sS --connect-timeout 5 --max-time 30 \
+        -o "$response_file" -w '%{http_code}' -u "$P_USERNAME:$P_PASSWORD" "$@" 2>"$curl_error_file"); then
+        case "$status" in
+          2[0-9][0-9])
+            dataset_actions="${dataset_actions}${dataset_actions:+,}$step"
+            return 0
+            ;;
+          *)
+            api_failure "$dataset" "$step" "HTTP $status"
+            return 1
+            ;;
+        esac
+      else
+        curl_exit=$?
+        api_failure "$dataset" "$step" "curl exit $curl_exit (HTTP $status)"
+        return 1
+      fi
+    }
+
+    {{- range $ds := $p.datasets }}
+    dataset_actions=""
+    dataset_ready=0
+    dataset_existed=0
+    : > "$response_file"
+    : > "$curl_error_file"
+    if status=$(curl -sS --connect-timeout 5 --max-time 30 \
+      -o "$response_file" -w '%{http_code}' -u "$P_USERNAME:$P_PASSWORD" \
+      "$base/api/v1/logstream/{{ $ds.name }}/info" 2>"$curl_error_file"); then
+      case "$status" in
+        200)
+          dataset_ready=1
+          dataset_existed=1
+          actual_type=$(sed -n \
+            -e 's/.*"telemetryType"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+            -e 's/.*"telemetry_type"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+            "$response_file" | head -n 1)
+          if [ "$actual_type" != "{{ $ds.telemetryType }}" ]; then
+            record_failure "{{ $ds.name }}" "telemetryType" \
+              "existing=${actual_type:-unknown}, requested={{ $ds.telemetryType }}; an existing dataset cannot change telemetry type"
+          fi
+          if ! grep -Eq '"log_source_format"[[:space:]]*:[[:space:]]*"{{ $ds.logSource }}"' "$response_file"; then
+            record_failure "{{ $ds.name }}" "logSource" \
+              "requested={{ $ds.logSource }} is absent from the existing dataset"
+          fi
+          ;;
+        404)
+          if run_step "{{ $ds.name }}" "create" -X PUT \
+            -H "X-P-Telemetry-Type: {{ $ds.telemetryType }}" \
+            -H "X-P-Log-Source: {{ $ds.logSource }}" \
+            {{- if $ds.tags }}
+            -H "X-P-Dataset-Tags: {{ join "," $ds.tags }}" \
+            {{- end }}
+            "$base/api/v1/logstream/{{ $ds.name }}"; then
+            dataset_ready=1
+          fi
+          ;;
+        *)
+          api_failure "{{ $ds.name }}" "lookup" "HTTP $status"
+          ;;
+      esac
+    else
+      curl_exit=$?
+      api_failure "{{ $ds.name }}" "lookup" "curl exit $curl_exit (HTTP $status)"
+    fi
+    if [ "$dataset_ready" -eq 1 ]; then
+      :
+      {{- if and $p.enterprise.enabled (hasKey $ds "tags") }}
+      if [ "$dataset_existed" -eq 1 ]; then
+        run_step "{{ $ds.name }}" "tags" -X PUT -H "Content-Type: application/json" \
+          -d '{"tags":{{ toJson $ds.tags }}}' \
+          "$base/api/prism/v1/datasets/{{ $ds.name }}" || true
+      fi
+      {{- end }}
+      {{- if $ds.smartCache }}
+      {{- if or (eq (printf "%v" $ds.smartCache.size) "0Gi") (eq (printf "%v" $ds.smartCache.size) "") }}
+      run_step "{{ $ds.name }}" "smartCache" -X DELETE \
+        "$base/api/v1/logstream/{{ $ds.name }}/hottier" || true
+      {{- else }}
+      run_step "{{ $ds.name }}" "smartCache" -X PUT -H "Content-Type: application/json" \
+        -d '{"size":"{{ mul (trimSuffix "Gi" $ds.smartCache.size | int) 1073741824 }}"}' \
+        "$base/api/v1/logstream/{{ $ds.name }}/hottier" || true
+      {{- end }}
+      {{- end }}
+      {{- if $ds.retention }}
+      {{- if or (eq (printf "%v" $ds.retention.durationDays) "0d") (eq (printf "%v" $ds.retention.durationDays) "") }}
+      run_step "{{ $ds.name }}" "retention" -X PUT -H "Content-Type: application/json" \
+        -d '[]' \
+        "$base/api/v1/logstream/{{ $ds.name }}/retention" || true
+      {{- else }}
+      run_step "{{ $ds.name }}" "retention" -X PUT -H "Content-Type: application/json" \
+        -d '[{"description":"created by helm","action":"delete","duration":"{{ $ds.retention.durationDays }}"}]' \
+        "$base/api/v1/logstream/{{ $ds.name }}/retention" || true
+      {{- end }}
+      {{- end }}
+    fi
+    if [ -n "$dataset_actions" ]; then
+      applied="${applied}${applied:+; }{{ $ds.name }}=$dataset_actions"
+    fi
+    {{- end }}
+    if [ "$errors" -ne 0 ]; then
+      if [ -n "$applied" ]; then
+        printf '%s | Applied: %s | %s error(s)\n' "$failures" "$applied" "$errors" >&2
+      else
+        printf '%s | %s error(s)\n' "$failures" "$errors" >&2
+      fi
+      exit 1
+    fi
+    echo "Dataset configuration completed successfully."
+  {{- end }}
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-datasets
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-output-log-policy": hook-failed
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ if eq (len $p.datasets) 0 }}540{{ else }}240{{ end }}
+  template:
+    metadata:
+      labels:
+        {{- include "parseable.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml $p.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: script
+          configMap:
+            name: {{ $fullname }}-datasets
+            defaultMode: 0755
+      containers:
+        - name: create-datasets
+          {{- if eq (len $p.datasets) 0 }}
+          image: docker.io/library/python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/scripts/reconcile-datasets.py"]
+          {{- else }}
+          image: docker.io/curlimages/curl:latest
+          command: [ "/bin/sh", "/scripts/create-datasets.sh" ]
+          {{- end }}
+          env:
+            - name: P_USERNAME
+              valueFrom: { secretKeyRef: { name: {{ $p.store.secretName }}, key: username } }
+            - name: P_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $p.store.secretName }}, key: password } }
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+{{- end }}
+
+{{- if and (hasKey .Values.parseable "datasets") (gt (len .Values.parseable.datasets) 0) }}
+{{- $p := .Values.parseable }}
+{{- $fullname := include "parseable.fullname" . }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-datasets-prune
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-output-log-policy": hook-failed
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 540
+  template:
+    metadata:
+      labels:
+        {{- include "parseable.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml $p.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: script
+          configMap:
+            name: {{ $fullname }}-datasets
+            defaultMode: 0755
+      containers:
+        - name: prune-datasets
+          image: docker.io/library/python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/scripts/reconcile-datasets.py"]
+          env:
+            - name: P_USERNAME
+              valueFrom: { secretKeyRef: { name: {{ $p.store.secretName }}, key: username } }
+            - name: P_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $p.store.secretName }}, key: password } }
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+{{- end }}
