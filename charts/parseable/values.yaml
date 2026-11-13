@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=./values.schema.json
 ## Parseable Helm chart
 ## Single chart for both OSS and Enterprise editions of Parseable. OSS and
 ## Enterprise ship as separate images (see `image` vs `enterprise.image`
@@ -453,12 +454,105 @@ parseable:
           port: 8000
 
   ## Create datasets and set their retention on install/upgrade.
-  ## datasets is a list of objects, each with a name and retention policy. Example:
+  ## Each dataset requires name, telemetryType, and logSource.
+  ## telemetryType: logs, metrics, traces.
+  ## logSource: json, otel-logs, otel-metrics, otel-traces.
+  ## OTel sources require their matching telemetry type. Tags and retention are optional.
+  ## Type and source apply at creation only.
+  ## Enterprise reconciles tags on upgrade; OSS applies tags on creation only.
+  ## Supported tag: agent-observability.
+  ## agent-observability requires an otel-traces dataset.
   ##   - name: "sample-dataset"
+  ##     telemetryType: traces
+  ##     logSource: otel-traces
+  ##     tags: ["agent-observability"]
   ##     retention:
-  ##       action: "delete"
-  ##       duration: "30d"
-  datasets: []
+  ##       durationDays: 30d
+  ## Retention accepts 1d to 3650d; 0d or an empty value removes it.
+  ## Smart Cache is Enterprise-only. size must be at least 10Gi; the
+  ## Enterprise querier hot-tier volume must have enough usable disk space.
+  ## Omit datasets to leave them untouched; set datasets: [] to delete all datasets.
+
+  ## Register API keys after datasets are ready. Set apiKeyType to ingestor for
+  ## global ingest access or query for the reader privilege on all datasets.
+  ## apiKeyType is required for every API key. Use secretKeyRef for
+  ## a caller-provided key, or omit it to let Parseable generate a key. Newly
+  ## generated keys are printed once in Helm output and also appear in Job and
+  ## CI logs; save them securely. Never put key values directly in values.yaml.
+  ## Secret values must be hyphenated UUID v4 strings.
+  ## Existing matching keys are left unchanged if they already have the
+  ## server-managed role for their apiKeyType. Other keys need explicit replacement.
+  ## Existing key values can be rotated. A value swap uses a temporary key
+  ## value and can be resumed by rerunning Helm if an update fails.
+  ## When apiKeys is present, keys omitted from the list are revoked.
+  ## Omit apiKeys to leave them untouched; set apiKeys: [] to revoke all API keys.
+  ##   - name: application-logs-key
+  ##     apiKeyType: ingestor
+  ##     secretKeyRef:
+  ##       name: parseable-api-keys
+  ##       key: LOGS_KEY
+  ##   - name: generated-key
+  ##     apiKeyType: query
+
+  ## Reconcile dashboards from ConfigMaps on each Helm install and upgrade.
+  ## Label each ConfigMap with parseable_dashboard: "1" and put one exported
+  ## dashboard JSON in a .json data field. The ConfigMap metadata.name is the
+  ## dashboard title; a title inside the JSON is ignored.
+  ## Existing dashboards absent from selected ConfigMaps are left unchanged.
+  ## A selector matching no ConfigMaps makes no changes. Omit this block or
+  ## set enabled: false to leave dashboards untouched.
+  ##
+  ##   dashboards:
+  ##     enabled: true
+  ##     label: parseable_dashboard
+  ##     labelValue: "1"
+
+  ## Create or update alert targets on install/upgrade. Targets are created
+  ## before alerts. Store endpoints and passwords in existing Kubernetes Secrets.
+  ## Type: slack, webhook, or alertManager. Webhook supports customHeaders;
+  ## webhook and AlertManager support skipTlsCheck. AlertManager can use
+  ## usernameSecretRef together with passwordSecretRef. Omit targets to leave
+  ## existing targets unchanged. Use targets: [] to delete all existing
+  ## targets. Removing one entry deletes that target after alerts are reconciled.
+  ## Changing a target ID under the same title replaces the old target only
+  ## when no alert uses it. Remove or switch those alerts first.
+  ##
+  ##   targets:
+  ##     - id: 01K9QQ9QC51KD43TE4HTJ4MW1D
+  ##       title: payments-webhook
+  ##       type: webhook
+  ##       endpointSecretRef:
+  ##         name: alert-target-secrets
+  ##         key: PAYMENTS_URL
+  ##       skipTlsCheck: false
+  ##       customHeaders:
+  ##         X-Team: payments
+  ##     - id: 01K9QQ9QC51KD43TE4HTJ4MW1E
+  ##       title: ops-alertmanager
+  ##       type: alertManager
+  ##       endpointSecretRef:
+  ##         name: alert-target-secrets
+  ##         key: ALERTMANAGER_URL
+  ##       usernameSecretRef:
+  ##         name: alert-target-secrets
+  ##         key: ALERTMANAGER_USERNAME
+  ##       passwordSecretRef:
+  ##         name: alert-target-secrets
+  ##         key: ALERTMANAGER_PASSWORD
+
+  ## Reconcile alerts from labeled ConfigMaps on Helm upgrades. Each matching
+  ## ConfigMap needs alert.json with target IDs in targets. Alert id is optional:
+  ## without one, the Job matches by unique title and lets the server generate
+  ## an ID for new alerts. Supply the existing alert ID to rename its title.
+  ## An explicit ID remains stable across clusters. Duplicate existing titles
+  ## cause an error. Alerts absent from the selected ConfigMaps are deleted;
+  ## an empty selection deletes all existing alerts when enabled is true.
+  ## Apply ConfigMaps before running Helm; edits alone do not trigger the Job.
+  ##
+  ##   alerts:
+  ##     enabled: true
+  ##     label: parseable_alert
+  ##     labelValue: "1"
 
   ## ServiceMonitor for this Parseable deployment. Read more on ServiceMonitor
   ## here: https://prometheus-operator.dev/docs/api-reference/api/#monitoring.coreos.com/v1.ServiceMonitor

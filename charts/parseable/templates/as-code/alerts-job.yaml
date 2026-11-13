@@ -1,0 +1,443 @@
+{{- $p := .Values.parseable }}
+{{- $alerts := default (dict) $p.alerts }}
+{{- $targets := default (list) $p.targets }}
+{{- if or $alerts.enabled (hasKey $p "targets") }}
+{{- if and $alerts.enabled (not $alerts.label) }}
+  {{- fail "alerts.label is required when alerts.enabled is true" }}
+{{- end }}
+{{- if and $alerts.enabled (not $alerts.labelValue) }}
+  {{- fail "alerts.labelValue is required when alerts.enabled is true" }}
+{{- end }}
+{{- $seenTargetTitles := dict }}
+{{- $seenTargetIDs := dict }}
+{{- range $index, $item := $targets }}
+  {{- $title := default (printf "item %d" $index) $item.title }}
+  {{- if or (not $item.title) (not (kindIs "string" $item.title)) (eq (trim $item.title) "") }}
+    {{- fail (printf "targets[%d]: title must be a nonempty string" $index) }}
+  {{- end }}
+  {{- if hasKey $seenTargetTitles $item.title }}
+    {{- fail (printf "targets[%d] (%s): duplicate title; already used by targets[%d]" $index $title (get $seenTargetTitles $item.title)) }}
+  {{- end }}
+  {{- $_ := set $seenTargetTitles $item.title $index }}
+  {{- if or (not $item.id) (not (kindIs "string" $item.id)) (not (regexMatch "^[0-7][0-9A-HJKMNP-TV-Z]{25}$" $item.id)) }}
+    {{- fail (printf "targets[%d] (%s): id must be a valid 26-character ULID (e.g. 01H7Z0XQ9G6K3JY1F5Z2X8V4E3)" $index $title) }}
+  {{- end }}
+  {{- if hasKey $seenTargetIDs $item.id }}
+    {{- fail (printf "targets[%d] (%s): duplicate id; already used by targets[%d]" $index $title (get $seenTargetIDs $item.id)) }}
+  {{- end }}
+  {{- $_ := set $seenTargetIDs $item.id $index }}
+  {{- if not $item.type }}
+    {{- fail (printf "targets[%d] (%s): type is required" $index $title) }}
+  {{- end }}
+  {{- if or (not $item.endpointSecretRef) (not $item.endpointSecretRef.name) (not $item.endpointSecretRef.key) }}
+    {{- fail (printf "targets[%d] (%s): endpointSecretRef.name and endpointSecretRef.key are required" $index $title) }}
+  {{- end }}
+  {{- if eq $item.type "slack" }}
+    {{- if or (hasKey $item "skipTlsCheck") (hasKey $item "customHeaders") (hasKey $item "usernameSecretRef") (hasKey $item "passwordSecretRef") }}
+      {{- fail (printf "targets[%d] (%s): slack supports only id, title, type, and endpointSecretRef" $index $title) }}
+    {{- end }}
+  {{- else if eq $item.type "webhook" }}
+    {{- if or (hasKey $item "usernameSecretRef") (hasKey $item "passwordSecretRef") }}
+      {{- fail (printf "targets[%d] (%s): webhook does not support AlertManager usernameSecretRef or passwordSecretRef" $index $title) }}
+    {{- end }}
+  {{- else if eq $item.type "alertManager" }}
+    {{- if hasKey $item "customHeaders" }}
+      {{- fail (printf "targets[%d] (%s): alertManager does not support customHeaders" $index $title) }}
+    {{- end }}
+    {{- if ne (hasKey $item "usernameSecretRef") (hasKey $item "passwordSecretRef") }}
+      {{- fail (printf "targets[%d] (%s): alertManager needs both usernameSecretRef and passwordSecretRef, or neither" $index $title) }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- $fullname := include "parseable.fullname" . }}
+{{- $target := printf "%s-querier-service" $fullname }}
+{{- if eq $p.deploymentMode "standalone" }}
+  {{- $target = printf "%s-standalone-service" $fullname }}
+{{- else if $p.enterprise.enabled }}
+  {{- $target = printf "%s-prism-service" $fullname }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "15"
+    "helm.sh/hook-output-log-policy": hook-failed
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 420
+  template:
+    metadata:
+      labels:
+        {{- include "parseable.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $fullname }}-alerts
+      securityContext:
+        {{- toYaml $p.podSecurityContext | nindent 8 }}
+      {{- include "parseable.waitForApi" . | nindent 6 }}
+      containers:
+        - name: reconcile-alerts
+          image: docker.io/library/python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-c"]
+          args:
+            - |-
+              import base64
+              import binascii
+              import json
+              import os
+              import re
+              import ssl
+              import sys
+              from urllib.error import HTTPError, URLError
+              from urllib.parse import quote, urlencode
+              from urllib.request import Request, urlopen
+
+              base = os.environ["PARSEABLE_BASE_URL"].rstrip("/")
+              auth = base64.b64encode(
+                  f'{os.environ["P_USERNAME"]}:{os.environ["P_PASSWORD"]}'.encode()
+              ).decode()
+              ulid_pattern = re.compile(r'^[0-7][0-9A-HJKMNP-TV-Z]{25}$')
+
+              def kubernetes_get(path, query=None):
+                  namespace = os.environ["POD_NAMESPACE"]
+                  url = f'https://kubernetes.default.svc/api/v1/namespaces/{namespace}/{path}'
+                  if query:
+                      url += '?' + urlencode(query)
+                  with open('/var/run/secrets/kubernetes.io/serviceaccount/token', encoding='utf-8') as file:
+                      token = file.read()
+                  req = Request(url, headers={"Authorization": f"Bearer {token}"})
+                  context = ssl.create_default_context(
+                      cafile='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
+                  )
+                  try:
+                      with urlopen(req, context=context, timeout=30) as response:
+                          return json.load(response)
+                  except HTTPError as error:
+                      raise ValueError(f'Kubernetes API {path}: HTTP {error.code}') from error
+
+              def secret_value(title, ref, field):
+                  if not isinstance(ref, dict) or not ref.get("name") or not ref.get("key"):
+                      raise ValueError(f'target {title!r}: {field}SecretRef needs name and key')
+                  secret_name, secret_key = ref["name"], ref["key"]
+                  secret = kubernetes_get('secrets/' + quote(secret_name, safe=''))
+                  encoded = secret.get("data", {}).get(secret_key)
+                  if not encoded:
+                      raise ValueError(
+                          f'target {title!r}: Secret {secret_name!r} has no {secret_key!r} field'
+                      )
+                  try:
+                      return base64.b64decode(encoded, validate=True).decode('utf-8')
+                  except (binascii.Error, ValueError, UnicodeDecodeError) as error:
+                      raise ValueError(
+                          f'target {title!r}: Secret {secret_name!r} field {secret_key!r} is invalid'
+                      ) from error
+
+              def target_from_values(data):
+                  if not isinstance(data, dict):
+                      raise ValueError('each targets entry must be an object')
+                  title, kind, id = data.get("title"), data.get("type"), data.get("id")
+                  if not isinstance(title, str) or not title.strip():
+                      raise ValueError('each targets entry needs a nonempty title')
+                  if not isinstance(id, str) or not ulid_pattern.fullmatch(id):
+                      raise ValueError(f'target {title!r}: id must be a canonical 26-character ULID starting with 0-7')
+                  if kind not in ("slack", "webhook", "alertManager"):
+                      raise ValueError(f'target {title!r}: type must be slack, webhook, or alertManager')
+                  allowed = {"id", "title", "type", "endpointSecretRef"}
+                  if kind == "webhook":
+                      allowed.update({"skipTlsCheck", "customHeaders"})
+                  elif kind == "alertManager":
+                      allowed.update({"skipTlsCheck", "usernameSecretRef", "passwordSecretRef"})
+                  unknown = set(data) - allowed
+                  if unknown:
+                      raise ValueError(f'target {title!r}: unknown field(s): {", ".join(sorted(unknown))}')
+                  endpoint = secret_value(title, data.get("endpointSecretRef"), "endpoint").strip()
+                  if not endpoint:
+                      raise ValueError(f'target {title!r}: endpoint Secret field is empty')
+                  # The UI calls this field Title; the Parseable API calls it name.
+                  target = {"id": id, "name": title, "type": kind, "endpoint": endpoint}
+                  if kind != "slack":
+                      skip_tls = data.get("skipTlsCheck", False)
+                      if not isinstance(skip_tls, bool):
+                          raise ValueError(f'target {title!r}: skipTlsCheck must be true or false')
+                      target["skipTlsCheck"] = skip_tls
+                  if kind == "webhook":
+                      headers = data.get("customHeaders", {})
+                      if not isinstance(headers, dict) or any(
+                          not isinstance(key, str) or not isinstance(value, str)
+                          for key, value in headers.items()
+                      ):
+                          raise ValueError(f'target {title!r}: customHeaders must map keys to string values')
+                      if headers:
+                          target["headers"] = headers
+                  if kind == "alertManager":
+                      username_ref = data.get("usernameSecretRef")
+                      password_ref = data.get("passwordSecretRef")
+                      if bool(username_ref) != bool(password_ref):
+                          raise ValueError(f'target {title!r}: usernameSecretRef and passwordSecretRef must be set together')
+                      if username_ref:
+                          username = secret_value(title, username_ref, "username")
+                          password = secret_value(title, password_ref, "password")
+                          if not username.strip() or not password:
+                              raise ValueError(f'target {title!r}: AlertManager username and password Secret fields must not be empty')
+                          target["username"] = username
+                          target["password"] = password
+                  return target
+
+              def discover():
+                  configured_targets = []
+                  seen_target_names = set()
+                  seen_target_ids = set()
+                  for data in json.loads(os.environ["CONFIGURED_TARGETS"]):
+                      target = target_from_values(data)
+                      if target["name"] in seen_target_names:
+                          raise ValueError(f'duplicate target title {target["name"]!r} in values')
+                      if target["id"] in seen_target_ids:
+                          raise ValueError(f'duplicate target id {target["id"]!r} in values')
+                      seen_target_names.add(target["name"])
+                      seen_target_ids.add(target["id"])
+                      configured_targets.append((target["name"], target))
+
+                  alerts = []
+                  if os.environ["ALERTS_ENABLED"] != "true":
+                      return configured_targets, alerts
+                  selector = f'{os.environ["ALERT_LABEL"]}={os.environ["ALERT_LABEL_VALUE"]}'
+                  configmaps = kubernetes_get('configmaps', {"labelSelector": selector})["items"]
+                  seen_titles = set()
+                  seen_alert_ids = set()
+                  for configmap in configmaps:
+                      name = configmap["metadata"]["name"]
+                      data = configmap.get("data", {})
+                      if "alert.json" not in data:
+                          raise ValueError(f'ConfigMap {name!r}: alert.json is required; define targets under parseable.targets in Helm values')
+                      try:
+                          alert = json.loads(data["alert.json"])
+                      except json.JSONDecodeError as error:
+                          raise ValueError(f'ConfigMap {name!r} field alert.json has invalid JSON: {error}') from error
+                      if not isinstance(alert, dict):
+                          raise ValueError(f'ConfigMap {name!r} field alert.json must be a JSON object')
+                      title = alert.get("title")
+                      if not isinstance(title, str) or not title.strip():
+                          raise ValueError(f'ConfigMap {name!r}: alert title is required')
+                      alert_id = alert.get("id")
+                      if "id" in alert and (not isinstance(alert_id, str) or not ulid_pattern.fullmatch(alert_id)):
+                          raise ValueError(f'ConfigMap {name!r}: alert id must be a canonical 26-character ULID starting with 0-7')
+                      if alert_id is not None:
+                          if alert_id in seen_alert_ids:
+                              raise ValueError(f'duplicate alert id {alert_id!r} in selected ConfigMaps')
+                          seen_alert_ids.add(alert_id)
+                      if title in seen_titles:
+                          raise ValueError(f'duplicate alert title {title!r} in selected ConfigMaps')
+                      seen_titles.add(title)
+                      alert_target_ids = alert.get("targets")
+                      if not isinstance(alert_target_ids, list) or not alert_target_ids or any(
+                          not isinstance(target, str) or not ulid_pattern.fullmatch(target) for target in alert_target_ids
+                      ):
+                          raise ValueError(f'ConfigMap {name!r}: targets must be a nonempty list of target ULIDs')
+                      if len(alert_target_ids) != len(set(alert_target_ids)):
+                          raise ValueError(f'ConfigMap {name!r}: targets contains duplicate target IDs')
+                      alerts.append((name, alert))
+                  return configured_targets, alerts
+
+              def request(method, endpoint, payload=None):
+                  body = None if payload is None else json.dumps(payload).encode()
+                  headers = {"Authorization": f"Basic {auth}"}
+                  if body is not None:
+                      headers["Content-Type"] = "application/json"
+                  req = Request(base + endpoint, data=body, headers=headers, method=method)
+                  try:
+                      with urlopen(req, timeout=30) as response:
+                          content = response.read()
+                  except HTTPError as error:
+                      # A proxy may echo Secret-backed target fields in its response.
+                      raise ValueError(f'{method} {endpoint}: HTTP {error.code}') from error
+                  except URLError as error:
+                      raise ValueError(f'{method} {endpoint}: {error.reason}') from error
+                  if method == "DELETE":
+                      return None
+                  return json.loads(content) if content else None
+
+              def existing_alerts():
+                  alerts = []
+                  offset = 0
+                  while True:
+                      page = request("GET", f'/api/v1/alerts?offset={offset}&limit=1000')
+                      if not isinstance(page, list):
+                          raise ValueError('GET /api/v1/alerts returned an unexpected response')
+                      alerts.extend(page)
+                      if len(page) < 1000:
+                          return alerts
+                      offset += len(page)
+
+              try:
+                  configured_targets, configured_alerts = discover()
+                  manage_targets = os.environ["MANAGE_TARGETS"] == "true"
+                  manage_alerts = os.environ["ALERTS_ENABLED"] == "true"
+                  desired_target_ids = {target["id"] for _, target in configured_targets}
+
+                  targets_response = request("GET", "/api/v1/targets")
+                  targets_by_id = {}
+                  target_ids_by_name = {}
+                  for item in targets_response:
+                      target = item["target"]
+                      name = target["name"]
+                      target_ids_by_name.setdefault(name, set()).add(target["id"])
+                      targets_by_id[target["id"]] = target
+
+                  target_changes = []
+                  replacement_ids = set()
+                  for title, target in configured_targets:
+                      name, target_id = target["name"], target["id"]
+                      previous_ids = target_ids_by_name.get(name, set()) - {target_id}
+                      if previous_ids & desired_target_ids:
+                          raise ValueError(f'target name {name!r} is used by another configured target')
+                      replacement_ids.update(previous_ids)
+                      if target_id in targets_by_id and targets_by_id[target_id]["name"] != name:
+                          existing_name = targets_by_id[target_id]["name"]
+                          raise ValueError(
+                              f'target ID {target_id} already has title {existing_name!r}; '
+                              f'changing it to {name!r} is not supported. '
+                              'Keep the existing title or create a target with a new ID'
+                          )
+                      target_changes.append((name, target_id in targets_by_id, target))
+                      target_ids_by_name.setdefault(name, set()).add(target_id)
+                      targets_by_id[target_id] = target
+
+                  alerts_by_id = {}
+                  alerts_by_title = {}
+                  all_existing_alerts = existing_alerts() if manage_alerts or replacement_ids else []
+                  for alert in all_existing_alerts:
+                      alerts_by_id[alert["id"]] = alert
+                      alerts_by_title.setdefault(alert["title"], []).append(alert)
+
+                  changes = []
+                  seen_resolved_ids = set()
+                  for configmap_name, alert in configured_alerts:
+                      title = alert["title"]
+                      requested_id = alert.get("id")
+                      title_matches = alerts_by_title.get(title, [])
+                      if len(title_matches) > 1:
+                          raise ValueError(f'alert title {title!r} is not unique; give existing alerts unique titles')
+                      if requested_id is not None:
+                          existing = alerts_by_id.get(requested_id)
+                      else:
+                          existing = title_matches[0] if title_matches else None
+                      alert_id = existing["id"] if existing else requested_id
+                      if title_matches and (not existing or title_matches[0]["id"] != alert_id):
+                          raise ValueError(f'alert title {title!r} already belongs to another alert')
+                      if alert_id is not None:
+                          if alert_id in seen_resolved_ids:
+                              raise ValueError(f'alert id {alert_id!r} is selected by more than one ConfigMap')
+                          seen_resolved_ids.add(alert_id)
+                      missing = [id for id in alert["targets"] if id not in targets_by_id]
+                      if missing:
+                          raise ValueError(f'alert {title!r}: target ID(s) not found: {", ".join(missing)}')
+                      if manage_targets:
+                          unmanaged = [id for id in alert["targets"] if id not in desired_target_ids]
+                          if unmanaged:
+                              raise ValueError(
+                                  f'alert {title!r}: target ID(s) are absent from parseable.targets: {", ".join(unmanaged)}'
+                              )
+                      payload = dict(alert)
+                      for field in ("version", "state", "notificationState", "created", "lastTriggeredAt"):
+                          payload.pop(field, None)
+                      payload.pop("parseableHelmConfigMap", None)
+                      if alert_id is not None:
+                          payload["id"] = alert_id
+                      changes.append((title, existing is not None, alert_id, payload))
+
+                  if replacement_ids:
+                      blocked_targets = {}
+                      for alert in all_existing_alerts:
+                          current = request("GET", f'/api/v1/alerts/{alert["id"]}')
+                          for old_id in set(current["targets"]) & replacement_ids:
+                              target_name = targets_by_id[old_id]["name"]
+                              blocked_targets.setdefault(target_name, set()).add(current["title"])
+                      if blocked_targets:
+                          target_name, alert_titles = sorted(blocked_targets.items())[0]
+                          names = ", ".join(repr(title) for title in sorted(alert_titles))
+                          raise ValueError(
+                              f'target {target_name!r} is used by alert(s): {names}; '
+                              'remove those alerts or switch them to another target before changing its ID'
+                          )
+
+                  for target_id in replacement_ids:
+                      request("DELETE", f'/api/v1/targets/{target_id}')
+                      print(f'Deleted old target ID: {target_id}')
+
+                  for name, exists, target in target_changes:
+                      if exists:
+                          response = request("PUT", f'/api/v1/targets/{target["id"]}', target)
+                      else:
+                          response = request("POST", "/api/v1/targets", target)
+                      if not isinstance(response, dict) or response.get("id") != target["id"] or response.get("name") != name:
+                          raise ValueError(
+                              f'target {name!r}: server did not return the requested id and title; '
+                              'deploy the Parseable image with stable target ID support'
+                          )
+                      print(f'{"Updated" if exists else "Created"} target: {name}')
+
+                  for title, exists, alert_id, payload in changes:
+                      if exists:
+                          response = request("PUT", f'/api/v1/alerts/{alert_id}', payload)
+                          action = "Updated"
+                      else:
+                          response = request("POST", "/api/v1/alerts", payload)
+                          action = "Created"
+                      response_id = response.get("id") if isinstance(response, dict) else None
+                      if (not isinstance(response_id, str) or not ulid_pattern.fullmatch(response_id)
+                          or (alert_id is not None and response_id != alert_id) or response.get("title") != title):
+                          raise ValueError(
+                              f'alert {title!r}: server did not return the expected id and title'
+                          )
+                      print(f'{action} alert: {title}')
+
+                  if manage_alerts:
+                      for alert_id, alert in alerts_by_id.items():
+                          if alert_id not in seen_resolved_ids:
+                              request("DELETE", f'/api/v1/alerts/{alert_id}')
+                              print(f'Deleted alert: {alert["title"]}')
+
+                  if manage_targets:
+                      for item in targets_response:
+                          target = item["target"]
+                          if target["id"] not in desired_target_ids and target["id"] not in replacement_ids:
+                              request("DELETE", f'/api/v1/targets/{target["id"]}')
+                              print(f'Deleted target: {target["name"]}')
+              except Exception as error:
+                  print(f"ERROR: {error}", file=sys.stderr)
+                  sys.exit(1)
+          env:
+            - name: CONFIGURED_TARGETS
+              value: {{ toJson $targets | quote }}
+            - name: MANAGE_TARGETS
+              value: {{ ternary "true" "false" (hasKey $p "targets") | quote }}
+            - name: ALERTS_ENABLED
+              value: {{ ternary "true" "false" (default false $alerts.enabled) | quote }}
+            - name: ALERT_LABEL
+              value: {{ default "" $alerts.label | quote }}
+            - name: ALERT_LABEL_VALUE
+              value: {{ default "" $alerts.labelValue | quote }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: PARSEABLE_BASE_URL
+              value: {{ printf "http://%s.%s" $target .Release.Namespace | quote }}
+            - name: P_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: username
+            - name: P_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: password
+{{- end }}

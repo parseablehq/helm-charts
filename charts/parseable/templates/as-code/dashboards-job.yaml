@@ -1,0 +1,184 @@
+{{- $p := .Values.parseable }}
+{{- if and $p.dashboards $p.dashboards.enabled }}
+{{- if not $p.dashboards.label }}
+  {{- fail "dashboards.label is required when dashboards.enabled is true" }}
+{{- end }}
+{{- if not $p.dashboards.labelValue }}
+  {{- fail "dashboards.labelValue is required when dashboards.enabled is true" }}
+{{- end }}
+{{- $fullname := include "parseable.fullname" . }}
+{{- $target := printf "%s-querier-service" $fullname }}
+{{- if eq $p.deploymentMode "standalone" }}
+  {{- $target = printf "%s-standalone-service" $fullname }}
+{{- else if $p.enterprise.enabled }}
+  {{- $target = printf "%s-prism-service" $fullname }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-dashboards
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-output-log-policy": hook-failed
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 420
+  template:
+    metadata:
+      labels:
+        {{- include "parseable.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $fullname }}-dashboards
+      securityContext:
+        {{- toYaml $p.podSecurityContext | nindent 8 }}
+      {{- include "parseable.waitForApi" . | nindent 6 }}
+      containers:
+        - name: import-dashboards
+          image: docker.io/library/python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-c"]
+          args:
+            - |-
+              import base64
+              import json
+              import os
+              import secrets
+              import ssl
+              import sys
+              import time
+              from urllib.error import HTTPError
+              from urllib.parse import urlencode
+              from urllib.request import Request, urlopen
+
+              base = os.environ["PARSEABLE_BASE_URL"].rstrip("/")
+              auth = base64.b64encode(
+                  f'{os.environ["P_USERNAME"]}:{os.environ["P_PASSWORD"]}'.encode()
+              ).decode()
+              path = "/api/v1/dashboards"
+              alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+              def discover():
+                  selector = f'{os.environ["DASHBOARD_LABEL"]}={os.environ["DASHBOARD_LABEL_VALUE"]}'
+                  namespace = os.environ["POD_NAMESPACE"]
+                  url = (
+                      f'https://kubernetes.default.svc/api/v1/namespaces/{namespace}/configmaps?'
+                      + urlencode({"labelSelector": selector})
+                  )
+                  with open('/var/run/secrets/kubernetes.io/serviceaccount/token', encoding='utf-8') as file:
+                      token = file.read()
+                  req = Request(url, headers={"Authorization": f"Bearer {token}"})
+                  context = ssl.create_default_context(
+                      cafile='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
+                  )
+                  try:
+                      with urlopen(req, context=context, timeout=30) as response:
+                          configmaps = json.load(response)["items"]
+                  except HTTPError as error:
+                      raise ValueError(
+                          f'cannot list dashboard ConfigMaps: Kubernetes API returned HTTP {error.code}'
+                      ) from error
+                  configured = []
+                  for configmap in configmaps:
+                      name = configmap["metadata"]["name"]
+                      files = sorted(
+                          (key, content) for key, content in configmap.get("data", {}).items()
+                          if key.endswith(".json")
+                      )
+                      if len(files) != 1:
+                          raise ValueError(
+                              f'ConfigMap {name!r} must have exactly one dashboard .json field; '
+                              f'found {len(files)}'
+                          )
+                      key, content = files[0]
+                      try:
+                          imported = json.loads(content)
+                      except json.JSONDecodeError as error:
+                          raise ValueError(
+                              f'ConfigMap {name!r} field {key!r} contains invalid JSON: {error}'
+                          ) from error
+                      if not isinstance(imported, dict):
+                          raise ValueError(f'ConfigMap {name!r} field {key!r} must contain a JSON object')
+                      configured.append((name, imported))
+                  return configured
+
+              def request(method, endpoint, payload=None):
+                  body = None if payload is None else json.dumps(payload).encode()
+                  headers = {"Authorization": f"Basic {auth}"}
+                  if body is not None:
+                      headers["Content-Type"] = "application/json"
+                  req = Request(base + endpoint, data=body, headers=headers, method=method)
+                  with urlopen(req, timeout=30) as response:
+                      content = response.read()
+                  return json.loads(content) if content else None
+
+              def new_ulid():
+                  value = ((time.time_ns() // 1_000_000) & ((1 << 48) - 1)) << 80
+                  value |= secrets.randbits(80)
+                  chars = []
+                  for _ in range(26):
+                      chars.append(alphabet[value & 31])
+                      value >>= 5
+                  return "".join(reversed(chars))
+
+              try:
+                  configured = discover()
+                  if not configured:
+                      print("No dashboard ConfigMaps match the configured label; no changes made")
+                      sys.exit(0)
+                  existing = {
+                      item["title"]: item["dashboardId"]
+                      for item in request("GET", path)
+                  }
+                  for title, imported in configured:
+                      dashboard = {
+                          "title": title,
+                          "tiles": [
+                              dict(tile, tile_id=new_ulid())
+                              for tile in imported.get("tiles", [])
+                          ],
+                          "tags": imported.get("tags", []),
+                          "sections": imported.get("sections", []),
+                          "variables": imported.get("variables", []),
+                          "isFavorite": False,
+                      }
+                      if "timeRange" in imported:
+                          dashboard["timeRange"] = imported["timeRange"]
+
+                      dashboard_id = existing.get(title)
+                      if dashboard_id:
+                          request("PUT", f"{path}/{dashboard_id}", dashboard)
+                          print(f'Updated dashboard: {title}')
+                      else:
+                          request("POST", path, dashboard)
+                          print(f'Created dashboard: {title}')
+              except Exception as error:
+                  print(f"ERROR: {error}", file=sys.stderr)
+                  sys.exit(1)
+          env:
+            - name: DASHBOARD_LABEL
+              value: {{ $p.dashboards.label | quote }}
+            - name: DASHBOARD_LABEL_VALUE
+              value: {{ $p.dashboards.labelValue | quote }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: PARSEABLE_BASE_URL
+              value: {{ printf "http://%s.%s" $target .Release.Namespace | quote }}
+            - name: P_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: username
+            - name: P_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $p.store.secretName }}
+                  key: password
+{{- end }}
