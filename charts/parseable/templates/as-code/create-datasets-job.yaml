@@ -255,7 +255,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: {{ if eq (len $p.datasets) 0 }}540{{ else }}240{{ end }}
+  activeDeadlineSeconds: {{ if eq (len $p.datasets) 0 }}540{{ else }}360{{ end }}
   template:
     metadata:
       labels:
@@ -264,6 +264,7 @@ spec:
       restartPolicy: Never
       securityContext:
         {{- toYaml $p.podSecurityContext | nindent 8 }}
+      {{- include "parseable.waitForApi" . | nindent 6 }}
       volumes:
         - name: script
           configMap:
@@ -316,6 +317,7 @@ spec:
       restartPolicy: Never
       securityContext:
         {{- toYaml $p.podSecurityContext | nindent 8 }}
+      {{- include "parseable.waitForApi" . | nindent 6 }}
       volumes:
         - name: script
           configMap:

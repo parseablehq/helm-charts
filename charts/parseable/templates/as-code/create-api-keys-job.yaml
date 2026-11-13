@@ -410,6 +410,7 @@ spec:
       restartPolicy: Never
       securityContext:
         {{- toYaml $p.podSecurityContext | nindent 8 }}
+      {{- include "parseable.waitForApi" . | nindent 6 }}
       volumes:
         - name: script
           configMap:

@@ -27,7 +27,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 300
+  activeDeadlineSeconds: 420
   template:
     metadata:
       labels:
@@ -37,6 +37,7 @@ spec:
       serviceAccountName: {{ $fullname }}-dashboards
       securityContext:
         {{- toYaml $p.podSecurityContext | nindent 8 }}
+      {{- include "parseable.waitForApi" . | nindent 6 }}
       containers:
         - name: import-dashboards
           image: docker.io/library/python:3.12-alpine

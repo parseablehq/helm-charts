@@ -70,7 +70,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: 300
+  activeDeadlineSeconds: 420
   template:
     metadata:
       labels:
@@ -80,6 +80,7 @@ spec:
       serviceAccountName: {{ $fullname }}-alerts
       securityContext:
         {{- toYaml $p.podSecurityContext | nindent 8 }}
+      {{- include "parseable.waitForApi" . | nindent 6 }}
       containers:
         - name: reconcile-alerts
           image: docker.io/library/python:3.12-alpine
@@ -254,8 +255,8 @@ spec:
                       with urlopen(req, timeout=30) as response:
                           content = response.read()
                   except HTTPError as error:
-                      detail = error.read(2048).decode(errors="replace")
-                      raise ValueError(f'{method} {endpoint}: HTTP {error.code}: {detail}') from error
+                      # A proxy may echo Secret-backed target fields in its response.
+                      raise ValueError(f'{method} {endpoint}: HTTP {error.code}') from error
                   except URLError as error:
                       raise ValueError(f'{method} {endpoint}: {error.reason}') from error
                   if method == "DELETE":
