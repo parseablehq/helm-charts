@@ -192,7 +192,7 @@
         },
         "dashboards": {
           "type": "object",
-          "description": "Reconcile dashboards from ConfigMaps in this release's namespace matching label=labelValue. Each ConfigMap must contain exactly one .json field; its metadata.name becomes the dashboard title. A selector with no matches makes no changes. Existing dashboards absent from matching ConfigMaps are left unchanged.",
+          "description": "Reconcile dashboards from ConfigMaps in this release's namespace matching label=labelValue. Each ConfigMap must contain exactly one .json field; its metadata.name becomes the dashboard title. When enabled, dashboards absent from matching ConfigMaps are deleted. A selector with no matches deletes all existing dashboards.",
           "required": ["enabled"],
           "properties": {
             "enabled": {"type": "boolean", "description": "Run the dashboard reconciliation Job on Helm install and upgrade. False leaves existing dashboards untouched."},

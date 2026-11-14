@@ -128,12 +128,11 @@ spec:
 
               try:
                   configured = discover()
-                  if not configured:
-                      print("No dashboard ConfigMaps match the configured label; no changes made")
-                      sys.exit(0)
+                  existing_dashboards = request("GET", path)
+                  desired_titles = {title for title, _ in configured}
                   existing = {
                       item["title"]: item["dashboardId"]
-                      for item in request("GET", path)
+                      for item in existing_dashboards
                   }
                   for title, imported in configured:
                       dashboard = {
@@ -157,6 +156,10 @@ spec:
                       else:
                           request("POST", path, dashboard)
                           print(f'Created dashboard: {title}')
+                  for item in existing_dashboards:
+                      if item["title"] not in desired_titles:
+                          request("DELETE", f'{path}/{item["dashboardId"]}')
+                          print(f'Deleted dashboard: {item["title"]}')
               except Exception as error:
                   print(f"ERROR: {error}", file=sys.stderr)
                   sys.exit(1)
