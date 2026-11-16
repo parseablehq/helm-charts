@@ -174,22 +174,9 @@ helm install parseable ./ -n parseable \
   -f overlays/aws.yaml -f overlays/enterprise.yaml
 ```
 
-Newer Enterprise images with a built-in default license can start without a
-license Secret. Select an image version that includes that support and disable
-the legacy Secret mount:
-
-```sh
-helm install parseable ./ -n parseable \
-  -f overlays/aws.yaml -f overlays/enterprise.yaml \
-  --set parseable.enterprise.image.tag=<version-with-default-license> \
-  --set parseable.enterprise.license.enabled=false
-```
-
-The new binary starts with its default license. An admin (super-admin in
-multi-tenant mode) can later upload the combined license JSON with
-`PUT /api/v1/license` on Prism. The server saves it
-in object storage and applies it without a Helm upgrade or restart. The legacy
-two-file Secret remains supported when `license.enabled=true` (the default).
+For Enterprise images with a built-in default license, set an explicit
+`parseable.enterprise.image.tag` and `parseable.enterprise.license.enabled=false`
+to omit the legacy Secret mount.
 
 ## Upgrade / Uninstall
 
