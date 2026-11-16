@@ -4,9 +4,7 @@
 {{- end }}
 {{- $p := .Values.parseable }}
 {{- $ent := $p.enterprise }}
-{{- if and (not $ent.license.enabled) (empty $ent.image.tag) }}
-{{- fail "parseable.enterprise.license.enabled=false requires an explicit Enterprise image tag that supports the built-in default license" }}
-{{- end }}
+{{- include "parseable.validateEnterpriseLicense" . }}
 {{- $node := $p.distributed.prism }}
 {{- $store := $p.store }}
 {{- $secret := $store.secretName }}

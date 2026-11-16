@@ -176,7 +176,7 @@ helm install parseable ./ -n parseable \
 
 For Enterprise images with a built-in default license, set an explicit
 `parseable.enterprise.image.tag` and `parseable.enterprise.license.enabled=false`
-to omit the legacy Secret mount.
+to omit the legacy Secret mount. Image tags through `v3.2.6` require the Secret.
 
 ## Upgrade / Uninstall
 

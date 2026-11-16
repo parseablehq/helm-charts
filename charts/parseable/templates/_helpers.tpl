@@ -59,3 +59,18 @@ Image reference for the readiness-wait init containers.
 {{- $w := .Values.parseable.waitImage -}}
 {{- printf "%s:%s" $w.repository (toString $w.tag) -}}
 {{- end }}
+
+{{/* Validate license-free startup only for Enterprise distributed deployments. */}}
+{{- define "parseable.validateEnterpriseLicense" -}}
+{{- $ent := .Values.parseable.enterprise -}}
+{{- if and (eq .Values.parseable.deploymentMode "distributed") $ent.enabled (not $ent.license.enabled) -}}
+  {{- if empty $ent.image.tag -}}
+    {{- fail "parseable.enterprise.license.enabled=false requires an explicit Enterprise image tag that supports the built-in default license" -}}
+  {{- end -}}
+  {{- if regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+" $ent.image.tag -}}
+    {{- if semverCompare "<=3.2.6" (regexFind "^v?[0-9]+\\.[0-9]+\\.[0-9]+" $ent.image.tag) -}}
+      {{- fail "Enterprise image tags v3.2.6 and older require a license Secret; use a newer image or set parseable.enterprise.license.enabled=true" -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
