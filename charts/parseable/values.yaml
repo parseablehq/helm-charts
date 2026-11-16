@@ -331,6 +331,7 @@ parseable:
         httpGet:
           path: /api/v1/readiness
           port: 8000
+        timeoutSeconds: 5
 
     ## querier (OSS + Enterprise) - serves queries and the console. OSS supports
     ## a single querier; Enterprise can run multiple queriers behind prism.
@@ -403,6 +404,7 @@ parseable:
         httpGet:
           path: /api/v1/readiness
           port: 8000
+        timeoutSeconds: 5
 
     ## prism (Enterprise only) - cluster coordinator, fronts the querier fleet.
     ## Deployed automatically whenever enterprise.enabled is true.
@@ -456,7 +458,7 @@ parseable:
           path: /api/v1/readiness
           port: 8000
         initialDelaySeconds: 5
-        timeoutSeconds: 10
+        timeoutSeconds: 5
 
   ## Create datasets and set their retention on install/upgrade.
   ## Each dataset requires name, telemetryType, and logSource.

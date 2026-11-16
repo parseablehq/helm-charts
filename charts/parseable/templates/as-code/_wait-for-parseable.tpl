@@ -18,7 +18,7 @@ initContainers:
       - |-
         deadline=$(( $(date +%s) + 120 ))
         echo "Waiting for Parseable API at {{ $url }}..."
-        until curl -fs --connect-timeout 2 --max-time 3 -o /dev/null "{{ $url }}/api/v1/readiness"; do
+        until curl -fs --connect-timeout 2 --max-time 5 -o /dev/null "{{ $url }}/api/v1/readiness"; do
           if [ "$(date +%s)" -ge "$deadline" ]; then
             echo "ERROR: Parseable API at {{ $url }} did not become ready within 120 seconds" >&2
             exit 1
