@@ -58,8 +58,9 @@
               }
             },
             "license": {
-              "description": "Enterprise license data and signature loaded from Kubernetes Secrets at startup.",
+              "description": "Legacy Enterprise license Secret settings. Disable for an Enterprise image with a built-in default license.",
               "properties": {
+                "enabled": {"description": "Mount the legacy license Secret on Enterprise pods. Defaults to true."},
                 "secretName": {"description": "Existing Secret containing the Enterprise license JSON and, for file mode, its signature."},
                 "mountPath": {"description": "Directory where the license files are mounted read-only inside each Enterprise pod."},
                 "dataKey": {"description": "Filename/Secret field containing the license JSON data."},

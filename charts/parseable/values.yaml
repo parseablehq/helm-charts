@@ -121,8 +121,10 @@ parseable:
       pullPolicy: IfNotPresent
     imagePullSecrets: []
 
-    ## License is validated at startup; the server refuses to start without one.
-    ## The license DATA is always mounted read-only from `secretName` at
+    ## Legacy license files are required by the chart's default Enterprise image.
+    ## For an Enterprise image supporting the built-in default license, set
+    ## enabled: false; a combined license file can then be uploaded via the API.
+    ## When enabled, license DATA is mounted read-only from `secretName` at
     ## `mountPath` on every node (P_LICENSE_DATA_FILE_PATH).
     ##   kubectl create secret generic parseable-license \
     ##     --from-file=parseable_license.json=resources/parseable_license.json \
@@ -135,6 +137,7 @@ parseable:
     ##     kubectl create secret generic parseable-env-secret \
     ##       --from-literal=license.signature.base64=$(base64 -w0 resources/parseable_license.sig)
     license:
+      enabled: true
       secretName: parseable-license
       mountPath: /tmp/license
       dataKey: parseable_license.json
@@ -452,6 +455,8 @@ parseable:
         httpGet:
           path: /api/v1/readiness
           port: 8000
+        initialDelaySeconds: 5
+        timeoutSeconds: 10
 
   ## Create datasets and set their retention on install/upgrade.
   ## Each dataset requires name, telemetryType, and logSource.

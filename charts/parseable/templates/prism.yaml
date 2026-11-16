@@ -4,6 +4,9 @@
 {{- end }}
 {{- $p := .Values.parseable }}
 {{- $ent := $p.enterprise }}
+{{- if and (not $ent.license.enabled) (empty $ent.image.tag) }}
+{{- fail "parseable.enterprise.license.enabled=false requires an explicit Enterprise image tag that supports the built-in default license" }}
+{{- end }}
 {{- $node := $p.distributed.prism }}
 {{- $store := $p.store }}
 {{- $secret := $store.secretName }}
@@ -120,9 +123,11 @@ spec:
           secret:
             secretName: {{ $store.gcsCredentials.secretName }}
         {{- end }}
+        {{- if $ent.license.enabled }}
         - name: license
           secret:
             secretName: {{ $ent.license.secretName }}
+        {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
@@ -187,6 +192,7 @@ spec:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: "{{ $store.gcsCredentials.mountPath }}/{{ $store.gcsCredentials.secretKey }}"
             {{- end }}
+            {{- if $ent.license.enabled }}
             - name: P_LICENSE_DATA_FILE_PATH
               value: "{{ $ent.license.mountPath }}/{{ $ent.license.dataKey }}"
             {{- if eq $ent.license.signature.source "base64" }}
@@ -198,6 +204,7 @@ spec:
             {{- else }}
             - name: P_LICENSE_SIGNATURE_FILE_PATH
               value: "{{ $ent.license.mountPath }}/{{ $ent.license.signature.key }}"
+            {{- end }}
             {{- end }}
             {{- if $ent.auditLogging.enabled }}
             - name: P_AUDIT_LOGGER
@@ -233,9 +240,11 @@ spec:
               mountPath: {{ $store.gcsCredentials.mountPath }}
               readOnly: true
             {{- end }}
+            {{- if $ent.license.enabled }}
             - name: license
               mountPath: {{ $ent.license.mountPath }}
               readOnly: true
+            {{- end }}
   {{- if or $node.persistence.enabled $node.cache.enabled }}
   volumeClaimTemplates:
     {{- if $node.persistence.enabled }}

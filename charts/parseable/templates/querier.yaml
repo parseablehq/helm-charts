@@ -150,7 +150,7 @@ spec:
           secret:
             secretName: {{ $store.gcsCredentials.secretName }}
         {{- end }}
-        {{- if $ent.enabled }}
+        {{- if and $ent.enabled $ent.license.enabled }}
         - name: license
           secret:
             secretName: {{ $ent.license.secretName }}
@@ -226,6 +226,7 @@ spec:
               value: "{{ $store.gcsCredentials.mountPath }}/{{ $store.gcsCredentials.secretKey }}"
             {{- end }}
             {{- if $ent.enabled }}
+            {{- if $ent.license.enabled }}
             - name: P_LICENSE_DATA_FILE_PATH
               value: "{{ $ent.license.mountPath }}/{{ $ent.license.dataKey }}"
             {{- if eq $ent.license.signature.source "base64" }}
@@ -237,6 +238,7 @@ spec:
             {{- else }}
             - name: P_LICENSE_SIGNATURE_FILE_PATH
               value: "{{ $ent.license.mountPath }}/{{ $ent.license.signature.key }}"
+            {{- end }}
             {{- end }}
             {{- if $ent.auditLogging.enabled }}
             - name: P_AUDIT_LOGGER
@@ -275,7 +277,7 @@ spec:
               mountPath: {{ $store.gcsCredentials.mountPath }}
               readOnly: true
             {{- end }}
-            {{- if $ent.enabled }}
+            {{- if and $ent.enabled $ent.license.enabled }}
             - name: license
               mountPath: {{ $ent.license.mountPath }}
               readOnly: true
