@@ -35,8 +35,8 @@ spec:
                 path: license.json
       containers:
         - name: install-license
-          image: docker.io/curlimages/curl:latest
-          imagePullPolicy: IfNotPresent
+          image: {{ include "parseable.waitImage" . | quote }}
+          imagePullPolicy: {{ $p.waitImage.pullPolicy }}
           command: ["/bin/sh", "-ec"]
           args:
             - |-
@@ -56,7 +56,7 @@ spec:
               echo "Provided license installed"
           env:
             - name: PARSEABLE_URL
-              value: {{ printf "http://%s-prism-service.%s" $fullname .Release.Namespace | quote }}
+              value: {{ printf "http://%s-prism-service.%s:%v" $fullname .Release.Namespace $p.distributed.prism.service.port | quote }}
             - name: P_USERNAME
               valueFrom:
                 secretKeyRef:

@@ -3,16 +3,19 @@
 {{- $p := .Values.parseable -}}
 {{- $fullname := include "parseable.fullname" . -}}
 {{- $target := printf "%s-querier-service" $fullname -}}
+{{- $port := $p.distributed.querier.service.port -}}
 {{- if eq $p.deploymentMode "standalone" -}}
   {{- $target = printf "%s-standalone-service" $fullname -}}
+  {{- $port = $p.standalone.service.port -}}
 {{- else if $p.enterprise.enabled -}}
   {{- $target = printf "%s-prism-service" $fullname -}}
+  {{- $port = $p.distributed.prism.service.port -}}
 {{- end -}}
-{{- $url := printf "http://%s.%s" $target .Release.Namespace -}}
+{{- $url := printf "http://%s.%s:%v" $target .Release.Namespace $port -}}
 initContainers:
   - name: wait-for-parseable
-    image: docker.io/curlimages/curl:latest
-    imagePullPolicy: IfNotPresent
+    image: {{ include "parseable.waitImage" . | quote }}
+    imagePullPolicy: {{ $p.waitImage.pullPolicy }}
     command: ["/bin/sh", "-c"]
     args:
       - |-
