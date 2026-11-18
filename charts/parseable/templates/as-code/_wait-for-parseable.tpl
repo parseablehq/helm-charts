@@ -6,7 +6,7 @@
 {{- $port := $p.distributed.querier.service.port -}}
 {{- if eq $p.deploymentMode "standalone" -}}
   {{- $target = printf "%s-standalone-service" $fullname -}}
-  {{- $port = $p.standalone.service.port -}}
+  {{- $port = $p.standalone.unified.service.port -}}
 {{- else if $p.enterprise.enabled -}}
   {{- $target = printf "%s-prism-service" $fullname -}}
   {{- $port = $p.distributed.prism.service.port -}}
