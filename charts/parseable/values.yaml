@@ -121,11 +121,16 @@ parseable:
       pullPolicy: IfNotPresent
     imagePullSecrets: []
 
-    ## Legacy license files are required by the chart's default Enterprise image.
-    ## For an Enterprise image supporting the built-in default license, set
-    ## enabled: false; a combined license file can then be uploaded via the API.
-    ## When enabled, license DATA is mounted read-only from `secretName` at
-    ## `mountPath` on every node (P_LICENSE_DATA_FILE_PATH).
+    ## License mode: legacy | default | provided.
+    ## legacy: mount the old license data and signature files on every node.
+    ## default: use the built-in default license until a license is uploaded in the UI.
+    ## provided: install a combined license JSON from secretName/dataKey.
+    ## default and provided require an Enterprise image tag supporting the built-in
+    ## default license (v3.2.7 or newer). The chart's default image is older.
+    ## legacy remains the default for existing values files.
+    ## In legacy mode, license DATA is mounted read-only from `secretName` at
+    ## `mountPath` on every node (P_LICENSE_DATA_FILE_PATH). Empty secretName
+    ## and dataKey use the previous legacy defaults. Both must be set for provided.
     ##   kubectl create secret generic parseable-license \
     ##     --from-file=parseable_license.json=resources/parseable_license.json \
     ##     --from-file=parseable_license.sig=resources/parseable_license.sig
@@ -137,10 +142,10 @@ parseable:
     ##     kubectl create secret generic parseable-env-secret \
     ##       --from-literal=license.signature.base64=$(base64 -w0 resources/parseable_license.sig)
     license:
-      enabled: true
-      secretName: parseable-license
+      mode: legacy
+      secretName: ""
       mountPath: /tmp/license
-      dataKey: parseable_license.json
+      dataKey: ""
       signature:
         source: file # file | base64
         ## file mode: key/filename inside `secretName`, mounted at `mountPath`.

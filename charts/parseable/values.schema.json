@@ -58,12 +58,12 @@
               }
             },
             "license": {
-              "description": "Legacy Enterprise license Secret settings. Disable for an Enterprise image with a built-in default license.",
+              "description": "Enterprise license source: legacy files, the built-in default, or a provided combined JSON Secret.",
               "properties": {
-                "enabled": {"description": "Mount the legacy license Secret on Enterprise pods. Defaults to true."},
-                "secretName": {"description": "Existing Secret containing the Enterprise license JSON and, for file mode, its signature."},
+                "mode": {"description": "legacy mounts old license files; default starts with the built-in license; provided installs a combined JSON from a Secret. Defaults to legacy.", "enum": ["legacy", "default", "provided"]},
+                "secretName": {"description": "Existing Secret containing either the legacy license files or the provided combined license JSON. Required in provided mode; empty uses parseable-license in legacy mode."},
                 "mountPath": {"description": "Directory where the license files are mounted read-only inside each Enterprise pod."},
-                "dataKey": {"description": "Filename/Secret field containing the license JSON data."},
+                "dataKey": {"description": "Secret field containing the legacy license data or, in provided mode, the combined license JSON. Required in provided mode; empty uses parseable_license.json in legacy mode."},
                 "signature": {
                   "description": "How the Enterprise license signature is provided.",
                   "properties": {

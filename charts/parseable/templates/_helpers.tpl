@@ -60,17 +60,33 @@ Image reference for the readiness-wait init containers.
 {{- printf "%s:%s" $w.repository (toString $w.tag) -}}
 {{- end }}
 
-{{/* Validate license-free startup only for Enterprise distributed deployments. */}}
+{{/* Select the Enterprise license source. */}}
+{{- define "parseable.enterpriseLicenseMode" -}}
+{{- .Values.parseable.enterprise.license.mode -}}
+{{- end -}}
+
+{{/* Validate Enterprise license configuration before rendering workloads. */}}
 {{- define "parseable.validateEnterpriseLicense" -}}
 {{- $ent := .Values.parseable.enterprise -}}
-{{- if and (eq .Values.parseable.deploymentMode "distributed") $ent.enabled (not $ent.license.enabled) -}}
+{{- if and (eq .Values.parseable.deploymentMode "distributed") $ent.enabled -}}
+  {{- $mode := include "parseable.enterpriseLicenseMode" . -}}
+  {{- if not (has $mode (list "legacy" "default" "provided")) -}}
+    {{- fail "parseable.enterprise.license.mode must be legacy, default, or provided" -}}
+  {{- end -}}
+  {{- if eq $mode "provided" -}}
+    {{- if or (empty $ent.license.secretName) (empty $ent.license.dataKey) -}}
+      {{- fail "parseable.enterprise.license.mode=provided requires license.secretName and license.dataKey" -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if ne $mode "legacy" -}}
   {{- if empty $ent.image.tag -}}
-    {{- fail "parseable.enterprise.license.enabled=false requires an explicit Enterprise image tag that supports the built-in default license" -}}
+    {{- fail "parseable.enterprise.license.mode=default or provided requires an explicit Enterprise image tag that supports the built-in default license" -}}
   {{- end -}}
   {{- if regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+" $ent.image.tag -}}
     {{- if semverCompare "<=3.2.6" (regexFind "^v?[0-9]+\\.[0-9]+\\.[0-9]+" $ent.image.tag) -}}
-      {{- fail "Enterprise image tags v3.2.6 and older require a license Secret; use a newer image or set parseable.enterprise.license.enabled=true" -}}
+      {{- fail "Enterprise image tags v3.2.6 and older require the legacy license Secret; use a newer image or set parseable.enterprise.license.mode=legacy" -}}
     {{- end -}}
+  {{- end -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}

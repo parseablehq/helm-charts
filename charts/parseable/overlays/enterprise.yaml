@@ -4,7 +4,7 @@
 # With the chart's default image, create the legacy license Secret
 # (parseable-license) with parseable_license.json and parseable_license.sig.
 # Newer Enterprise images with a built-in default license can use
-# parseable.enterprise.license.enabled=false instead.
+# parseable.enterprise.license.mode=default or mode=provided instead.
 parseable:
   deploymentMode: distributed
   clusterSecret:
