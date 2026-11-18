@@ -130,7 +130,9 @@ parseable:
     ## legacy remains the default for existing values files.
     ## In legacy mode, license DATA is mounted read-only from `secretName` at
     ## `mountPath` on every node (P_LICENSE_DATA_FILE_PATH). Empty secretName
-    ## and dataKey use the previous legacy defaults. Both must be set for provided.
+    ## and dataKey use the previous legacy defaults. Empty mountPath and signature
+    ## fields also use their previous defaults in legacy mode. Both secretName and
+    ## dataKey must be set for provided.
     ##   kubectl create secret generic parseable-license \
     ##     --from-file=parseable_license.json=resources/parseable_license.json \
     ##     --from-file=parseable_license.sig=resources/parseable_license.sig
@@ -144,12 +146,12 @@ parseable:
     license:
       mode: legacy
       secretName: ""
-      mountPath: /tmp/license
+      mountPath: ""
       dataKey: ""
       signature:
-        source: file # file | base64
+        source: "" # file | base64; empty uses file in legacy mode
         ## file mode: key/filename inside `secretName`, mounted at `mountPath`.
-        key: parseable_license.sig
+        key: "" # empty uses parseable_license.sig in legacy mode
         ## base64 mode only: existing secret holding the base64-encoded signature.
         ## Ignored when source is file; uncomment and set when source is base64.
         base64: {}

@@ -221,7 +221,7 @@ spec:
             {{- if $ent.enabled }}
             {{- if (eq (include "parseable.enterpriseLicenseMode" .) "legacy") }}
             - name: P_LICENSE_DATA_FILE_PATH
-              value: "{{ $ent.license.mountPath }}/{{ default "parseable_license.json" $ent.license.dataKey }}"
+              value: "{{ default "/tmp/license" $ent.license.mountPath }}/{{ default "parseable_license.json" $ent.license.dataKey }}"
             {{- if eq $ent.license.signature.source "base64" }}
             - name: P_LICENSE_SIGNATURE_BASE64
               valueFrom:
@@ -230,7 +230,7 @@ spec:
                   key: {{ $ent.license.signature.base64.key }}
             {{- else }}
             - name: P_LICENSE_SIGNATURE_FILE_PATH
-              value: "{{ $ent.license.mountPath }}/{{ $ent.license.signature.key }}"
+              value: "{{ default "/tmp/license" $ent.license.mountPath }}/{{ default "parseable_license.sig" $ent.license.signature.key }}"
             {{- end }}
             {{- end }}
             {{- if $ent.auditLogging.enabled }}
@@ -268,7 +268,7 @@ spec:
             {{- end }}
             {{- if and $ent.enabled (eq (include "parseable.enterpriseLicenseMode" .) "legacy") }}
             - name: license
-              mountPath: {{ $ent.license.mountPath }}
+              mountPath: {{ default "/tmp/license" $ent.license.mountPath }}
               readOnly: true
             {{- end }}
   {{- if $node.persistence.staging.enabled }}

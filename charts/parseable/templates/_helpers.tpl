@@ -73,6 +73,18 @@ Image reference for the readiness-wait init containers.
   {{- if not (has $mode (list "legacy" "default" "provided")) -}}
     {{- fail "parseable.enterprise.license.mode must be legacy, default, or provided" -}}
   {{- end -}}
+  {{- if eq $mode "default" -}}
+    {{- range $key, $value := $ent.license -}}
+      {{- if and (ne $key "mode") (ne $key "signature") (not (empty $value)) -}}
+        {{- fail (printf "parseable.enterprise.license.mode=default does not accept license.%s" $key) -}}
+      {{- end -}}
+    {{- end -}}
+    {{- range $key, $value := $ent.license.signature -}}
+      {{- if not (empty $value) -}}
+        {{- fail (printf "parseable.enterprise.license.mode=default does not accept license.signature.%s" $key) -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
   {{- if eq $mode "provided" -}}
     {{- if or (empty $ent.license.secretName) (empty $ent.license.dataKey) -}}
       {{- fail "parseable.enterprise.license.mode=provided requires license.secretName and license.dataKey" -}}
