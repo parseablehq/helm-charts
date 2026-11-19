@@ -498,9 +498,9 @@ parseable:
   ## Label each ConfigMap with parseable_dashboard: "1" and put one exported
   ## dashboard JSON in a .json data field. The ConfigMap metadata.name is the
   ## dashboard title; a title inside the JSON is ignored.
-  ## Existing dashboards absent from selected ConfigMaps are left unchanged.
-  ## A selector matching no ConfigMaps makes no changes. Omit this block or
-  ## set enabled: false to leave dashboards untouched.
+  ## With enabled: true, dashboards absent from selected ConfigMaps are deleted.
+  ## If no ConfigMaps match, all existing dashboards are deleted. Omit this block
+  ## or set enabled: false to leave dashboards untouched.
   ##
   ##   dashboards:
   ##     enabled: true
