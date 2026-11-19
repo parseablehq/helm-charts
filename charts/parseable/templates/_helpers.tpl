@@ -79,14 +79,11 @@ Image reference for the readiness-wait init containers.
       {{- fail "License signature is configured, but license.secretName is missing. Set it to the name of the Kubernetes Secret containing the license files." -}}
     {{- end -}}
     {{- if empty $license.dataKey -}}
-      {{- fail "License signature is configured, but license.dataKey is missing. Set it to the .json key in that Secret, for example: dataKey: parseable_license.json" -}}
+      {{- fail "License signature is configured, but license.dataKey is missing. Set it to the license data key in that Secret." -}}
     {{- end -}}
     {{- if eq $ent.license.signature.source "file" -}}
       {{- if empty $ent.license.signature.key -}}
         {{- fail "parseable.enterprise.license.signature.source=file requires signature.key" -}}
-      {{- end -}}
-      {{- if not (hasSuffix ".sig" $license.signature.key) -}}
-        {{- fail "parseable.enterprise.license.signature.key must end with .sig" -}}
       {{- end -}}
     {{- else if eq $ent.license.signature.source "base64" -}}
       {{- if or (empty $ent.license.signature.base64.secretName) (empty $ent.license.signature.base64.key) -}}
@@ -99,9 +96,6 @@ Image reference for the readiness-wait init containers.
     {{- if or (empty $ent.license.secretName) (empty $ent.license.dataKey) -}}
       {{- fail "parseable.enterprise.license requires both secretName and dataKey for the license API Job" -}}
     {{- end -}}
-  {{- end -}}
-  {{- if and $hasLicense (not (empty $license.dataKey)) (not (hasSuffix ".json" $license.dataKey)) -}}
-    {{- fail "parseable.enterprise.license.dataKey must end with .json" -}}
   {{- end -}}
   {{- if and (not $hasSignature) (not (empty $ent.license.mountPath)) -}}
     {{- fail "parseable.enterprise.license.mountPath is only used with a legacy signature" -}}

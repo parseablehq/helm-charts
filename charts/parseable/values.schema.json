@@ -62,12 +62,12 @@
               "properties": {
                 "secretName": {"description": "Existing Secret containing the combined license JSON or legacy license files. Required whenever license is configured."},
                 "mountPath": {"description": "Directory where the license files are mounted read-only inside each Enterprise pod."},
-                "dataKey": {"description": "Secret field containing the license JSON. Required whenever license is configured; must end with .json."},
+                "dataKey": {"description": "Secret field containing the license JSON. Required whenever license is configured."},
                 "signature": {
                   "description": "How the Enterprise license signature is provided.",
                   "properties": {
                     "source": {"description": "file reads the signature from license.secretName; base64 reads it from signature.base64."},
-                    "key": {"description": "Signature filename/Secret field when source is file; must end with .sig."},
+                    "key": {"description": "Signature filename/Secret field when source is file."},
                     "base64": {
                       "description": "Secret reference for a base64-encoded signature when source is base64.",
                       "properties": {
