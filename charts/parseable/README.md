@@ -174,23 +174,19 @@ helm install parseable ./ -n parseable \
   -f overlays/aws.yaml -f overlays/enterprise.yaml
 ```
 
-To use the new license flow, set the Enterprise image tag to `v3.2.7` or newer
-and choose `default` or `provided`:
+For Enterprise image `v3.2.7` or newer, omit `license` to start with the
+built-in 50 GB license:
 
 ```yaml
 parseable:
   enterprise:
+    enabled: true
     image:
       tag: v3.2.7
-    license:
-      mode: default
 ```
 
-`default` starts with the built-in license. An admin can later upload a
-combined license JSON in the UI. Parseable loads an uploaded license from object
-storage on subsequent starts, even when the chart mode remains `default`.
-
-To provide the combined license JSON through an existing Kubernetes Secret:
+To install a license JSON through the helm, create a Secret with the
+JSON file and set `secretName` and `dataKey`:
 
 ```sh
 kubectl -n parseable create secret generic parseable-license \
@@ -203,10 +199,10 @@ parseable:
     image:
       tag: v3.2.7
     license:
-      mode: provided
       secretName: parseable-license
       dataKey: license.json
 ```
+Images older than `v3.2.7` require this legacy configuration.
 
 The chart applies the provided file after the deployment starts. Enterprise
 nodes load the license from object storage. The file must be a single JSON
@@ -214,8 +210,8 @@ object with base64-encoded `license` and `signature` fields. The credentials in
 the configured store Secret must belong to a super-admin in multi-tenant mode.
 
 For existing deployments, keep the legacy settings during an image-only upgrade.
-Switch to `provided` after preparing the combined JSON Secret, or use `default`
-and upload through the UI.
+For a newer image, remove `signature` to apply a combined JSON through the API
+Job, or remove the entire `license` block to use the built-in default.
 
 ## Upgrade / Uninstall
 

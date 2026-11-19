@@ -121,39 +121,20 @@ parseable:
       pullPolicy: IfNotPresent
     imagePullSecrets: []
 
-    ## License mode: legacy | default | provided.
-    ## legacy: mount the old license data and signature files on every node.
-    ## default: use the built-in default license until a license is uploaded in the UI.
-    ## provided: install a combined license JSON from secretName/dataKey.
-    ## default and provided require an Enterprise image tag supporting the built-in
-    ## default license (v3.2.7 or newer). The chart's default image is older.
-    ## legacy remains the default for existing values files.
-    ## In legacy mode, license DATA is mounted read-only from `secretName` at
-    ## `mountPath` on every node (P_LICENSE_DATA_FILE_PATH). Empty secretName
-    ## and dataKey use the previous legacy defaults. Empty mountPath and signature
-    ## fields also use their previous defaults in legacy mode. Both secretName and
-    ## dataKey must be set for provided.
-    ##   kubectl create secret generic parseable-license \
-    ##     --from-file=parseable_license.json=resources/parseable_license.json \
-    ##     --from-file=parseable_license.sig=resources/parseable_license.sig
-    ##
-    ## The license SIGNATURE can be supplied one of two ways:
-    ##   source: file   - mounted from `secretName` (P_LICENSE_SIGNATURE_FILE_PATH)
-    ##   source: base64 - base64 string from an existing secret via secretKeyRef
-    ##                    (P_LICENSE_SIGNATURE_BASE64), e.g.
-    ##     kubectl create secret generic parseable-env-secret \
-    ##       --from-literal=license.signature.base64=$(base64 -w0 resources/parseable_license.sig)
+    ## License flow is selected from the fields below:
+    ## - No license fields: use the built-in 50 GB license (image v3.2.7+).
+    ## - secretName + dataKey: install the license with a Job.
+    ## - secretName + dataKey + signature: mount legacy license files on
+    ##   every Enterprise pod; no license Job runs.
+    ## Images older than v3.2.7 require the legacy signature configuration.
     license:
-      mode: legacy
       secretName: ""
-      mountPath: ""
+      mountPath: "" # optional; defaults to /tmp/license for legacy files
       dataKey: ""
       signature:
-        source: "" # file | base64; empty uses file in legacy mode
-        ## file mode: key/filename inside `secretName`, mounted at `mountPath`.
-        key: "" # empty uses parseable_license.sig in legacy mode
-        ## base64 mode only: existing secret holding the base64-encoded signature.
-        ## Ignored when source is file; uncomment and set when source is base64.
+        source: "" # file | base64; omit for the combined JSON API Job
+        key: "" # filename inside secretName when source is file
+        ## Existing base64 signature Secret reference when source is base64.
         base64: {}
           # secretName: parseable-env-secret
           # key: license.signature.base64

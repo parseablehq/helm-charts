@@ -58,17 +58,16 @@
               }
             },
             "license": {
-              "description": "Enterprise license source: legacy files, the built-in default, or a provided combined JSON Secret.",
+              "description": "Omit for the built-in 50 GB license (v3.2.7+); set secretName and dataKey for the license API Job; add signature for legacy mounted files.",
               "properties": {
-                "mode": {"description": "legacy mounts old license files; default starts with the built-in license; provided installs a combined JSON from a Secret. Defaults to legacy.", "enum": ["legacy", "default", "provided"]},
-                "secretName": {"description": "Existing Secret containing either the legacy license files or the provided combined license JSON. Required in provided mode; empty uses parseable-license in legacy mode."},
+                "secretName": {"description": "Existing Secret containing the combined license JSON or legacy license files. Required whenever license is configured."},
                 "mountPath": {"description": "Directory where the license files are mounted read-only inside each Enterprise pod."},
-                "dataKey": {"description": "Secret field containing the legacy license data or, in provided mode, the combined license JSON. Required in provided mode; empty uses parseable_license.json in legacy mode."},
+                "dataKey": {"description": "Secret field containing the license JSON. Required whenever license is configured; must end with .json."},
                 "signature": {
                   "description": "How the Enterprise license signature is provided.",
                   "properties": {
                     "source": {"description": "file reads the signature from license.secretName; base64 reads it from signature.base64."},
-                    "key": {"description": "Signature filename/Secret field when source is file."},
+                    "key": {"description": "Signature filename/Secret field when source is file; must end with .sig."},
                     "base64": {
                       "description": "Secret reference for a base64-encoded signature when source is base64.",
                       "properties": {

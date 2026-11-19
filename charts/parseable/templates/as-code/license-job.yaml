@@ -1,4 +1,4 @@
-{{- if and (eq .Values.parseable.deploymentMode "distributed") .Values.parseable.enterprise.enabled (eq (include "parseable.enterpriseLicenseMode" .) "provided") }}
+{{- if and (eq .Values.parseable.deploymentMode "distributed") .Values.parseable.enterprise.enabled (not (empty .Values.parseable.enterprise.license.secretName)) (not (empty .Values.parseable.enterprise.license.dataKey)) (empty .Values.parseable.enterprise.license.signature.source) (empty .Values.parseable.enterprise.license.signature.key) (empty .Values.parseable.enterprise.license.signature.base64) }}
 {{- $p := .Values.parseable }}
 {{- $license := $p.enterprise.license }}
 {{- $fullname := include "parseable.fullname" . }}
@@ -15,7 +15,7 @@ metadata:
     "helm.sh/hook-output-log-policy": hook-failed
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
 spec:
-  backoffLimit: 2
+  backoffLimit: 1
   activeDeadlineSeconds: 540
   template:
     metadata:
@@ -25,11 +25,11 @@ spec:
       restartPolicy: Never
       securityContext:
         {{- toYaml $p.podSecurityContext | nindent 8 }}
-      {{- include "parseable.waitForApi" . | nindent 6 }}
       volumes:
         - name: license
           secret:
             secretName: {{ $license.secretName | quote }}
+            optional: true
             items:
               - key: {{ $license.dataKey | quote }}
                 path: license.json
@@ -40,6 +40,22 @@ spec:
           command: ["/bin/sh", "-ec"]
           args:
             - |-
+              if [ ! -f /license/license.json ]; then
+                echo "ERROR: License file not found. Secret {{ $license.secretName }} in namespace {{ .Release.Namespace }} must contain key {{ $license.dataKey }}; check license.secretName and license.dataKey." >&2
+                exit 1
+              fi
+              if [ ! -s /license/license.json ]; then
+                echo "ERROR: License key {{ $license.dataKey }} in Secret {{ $license.secretName }} is empty." >&2
+                exit 1
+              fi
+              deadline=$(( $(date +%s) + 120 ))
+              until curl -fs --connect-timeout 2 --max-time 5 -o /dev/null "$PARSEABLE_URL/api/v1/readiness"; do
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "ERROR: Parseable API did not become ready within 120 seconds" >&2
+                  exit 1
+                fi
+                sleep 5
+              done
               if ! status=$(curl -sS --connect-timeout 5 --max-time 120 \
                 -o /dev/null -w '%{http_code}' \
                 -u "$P_USERNAME:$P_PASSWORD" \
@@ -47,6 +63,10 @@ spec:
                 -X PUT --data-binary @/license/license.json \
                 "$PARSEABLE_URL/api/v1/license"); then
                 echo "Failed to install the provided license" >&2
+                exit 1
+              fi
+              if [ "$status" = "400" ]; then
+                echo "ERROR: Invalid license (HTTP 400). Verify the license and retry." >&2
                 exit 1
               fi
               if [ "$status" != "200" ]; then

@@ -1,10 +1,6 @@
 # Parseable Enterprise (adds the prism coordinator).
 # Layer this on top of a store overlay, e.g.:
 #   helm install parseable ./ -n parseable -f overlays/aws.yaml -f overlays/enterprise.yaml
-# With the chart's default image, create the legacy license Secret
-# (parseable-license) with parseable_license.json and parseable_license.sig.
-# Newer Enterprise images with a built-in default license can use
-# parseable.enterprise.license.mode=default or mode=provided instead.
 parseable:
   deploymentMode: distributed
   clusterSecret:

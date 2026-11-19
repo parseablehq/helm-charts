@@ -150,7 +150,7 @@ spec:
           secret:
             secretName: {{ $store.gcsCredentials.secretName }}
         {{- end }}
-        {{- if and $ent.enabled (eq (include "parseable.enterpriseLicenseMode" .) "legacy") }}
+        {{- if and $ent.enabled (not (empty $ent.license.signature.source)) }}
         - name: license
           secret:
             secretName: {{ default "parseable-license" $ent.license.secretName }}
@@ -226,7 +226,7 @@ spec:
               value: "{{ $store.gcsCredentials.mountPath }}/{{ $store.gcsCredentials.secretKey }}"
             {{- end }}
             {{- if $ent.enabled }}
-            {{- if (eq (include "parseable.enterpriseLicenseMode" .) "legacy") }}
+            {{- if (not (empty $ent.license.signature.source)) }}
             - name: P_LICENSE_DATA_FILE_PATH
               value: "{{ default "/tmp/license" $ent.license.mountPath }}/{{ default "parseable_license.json" $ent.license.dataKey }}"
             {{- if eq $ent.license.signature.source "base64" }}
@@ -277,7 +277,7 @@ spec:
               mountPath: {{ $store.gcsCredentials.mountPath }}
               readOnly: true
             {{- end }}
-            {{- if and $ent.enabled (eq (include "parseable.enterpriseLicenseMode" .) "legacy") }}
+            {{- if and $ent.enabled (not (empty $ent.license.signature.source)) }}
             - name: license
               mountPath: {{ default "/tmp/license" $ent.license.mountPath }}
               readOnly: true
