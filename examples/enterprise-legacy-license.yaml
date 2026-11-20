@@ -23,7 +23,7 @@ parseable:
       tag: "" # if empty, the chart will use its default app version 
       pullPolicy: Always
     license:
-      secretName: parseable-license-new
+      secretName: parseable-license
       dataKey: parseable_license.json
       signature:
         source: file
