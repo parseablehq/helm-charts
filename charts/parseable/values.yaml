@@ -24,7 +24,7 @@ parseable:
   ## deploymentMode: standalone | distributed
   ## standalone  - a single all-in-one pod (the `standalone.unified` section).
   ##               Simplest way to run Parseable, does not scale horizontally.
-  ##               OSS or Enterprise both can be run in standalone mode.
+  ##               OSS only.
   ## distributed - separate ingestor + querier pods (the `distributed.ingestor`
   ##               / `distributed.querier` sections), plus `distributed.prism`
   ##               when `enterprise.enabled` is true.
