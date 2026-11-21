@@ -1,12 +1,44 @@
 {{- $p := .Values.parseable }}
 {{- $alerts := default (dict) $p.alerts }}
 {{- $targets := default (list) $p.targets }}
-{{- if or $alerts.enabled (hasKey $p "targets") }}
-{{- if and $alerts.enabled (not $alerts.label) }}
-  {{- fail "alerts.label is required when alerts.enabled is true" }}
+{{- if hasKey $p "alerts" }}
+  {{- range $field := keys $alerts }}
+    {{- if not (has $field (list "enabled" "git")) }}
+      {{- fail (printf "Unknown parseable.alerts field %q. Use enabled and git" $field) }}
+    {{- end }}
+  {{- end }}
+  {{- if not (hasKey $alerts "enabled") }}
+    {{- fail "parseable.alerts.enabled is required; check its spelling in values" }}
+  {{- end }}
 {{- end }}
-{{- if and $alerts.enabled (not $alerts.labelValue) }}
-  {{- fail "alerts.labelValue is required when alerts.enabled is true" }}
+{{- if or $alerts.enabled (hasKey $p "targets") }}
+{{- if $alerts.enabled }}
+  {{- if not $alerts.git }}
+    {{- fail "alerts.git is required when alerts.enabled is true" }}
+  {{- end }}
+  {{- range $field := keys $alerts.git }}
+    {{- if not (has $field (list "repository" "ref" "path" "secretKeyRef")) }}
+      {{- fail (printf "Unknown alerts.git field %q. Use repository, ref, path, or secretKeyRef" $field) }}
+    {{- end }}
+  {{- end }}
+  {{- range $field := list "repository" "ref" "path" }}
+    {{- if not (index $alerts.git $field) }}
+      {{- fail (printf "alerts.git.%s is required; check its spelling in values" $field) }}
+    {{- end }}
+  {{- end }}
+  {{- if not $alerts.git.secretKeyRef }}
+    {{- fail "alerts.git.secretKeyRef is required; check its spelling in values" }}
+  {{- end }}
+  {{- range $field := keys $alerts.git.secretKeyRef }}
+    {{- if not (has $field (list "name" "key")) }}
+      {{- fail (printf "Unknown alerts.git.secretKeyRef field %q. Use name and key" $field) }}
+    {{- end }}
+  {{- end }}
+  {{- range $field := list "name" "key" }}
+    {{- if not (index $alerts.git.secretKeyRef $field) }}
+      {{- fail (printf "alerts.git.secretKeyRef.%s is required; check its spelling in values" $field) }}
+    {{- end }}
+  {{- end }}
 {{- end }}
 {{- $seenTargetTitles := dict }}
 {{- $seenTargetIDs := dict }}
@@ -77,10 +109,9 @@ spec:
         {{- include "parseable.labels" . | nindent 8 }}
     spec:
       restartPolicy: Never
-      serviceAccountName: {{ $fullname }}-alerts
+      automountServiceAccountToken: false
       securityContext:
         {{- toYaml $p.podSecurityContext | nindent 8 }}
-      {{- include "parseable.waitForApi" . | nindent 6 }}
       containers:
         - name: reconcile-alerts
           image: docker.io/library/python:3.12-alpine
@@ -93,10 +124,11 @@ spec:
               import json
               import os
               import re
-              import ssl
               import sys
+              import time
+              from concurrent.futures import ThreadPoolExecutor
               from urllib.error import HTTPError, URLError
-              from urllib.parse import quote, urlencode
+              from urllib.parse import quote, urlencode, urlparse
               from urllib.request import Request, urlopen
 
               base = os.environ["PARSEABLE_BASE_URL"].rstrip("/")
@@ -105,41 +137,115 @@ spec:
               ).decode()
               ulid_pattern = re.compile(r'^[0-7][0-9A-HJKMNP-TV-Z]{25}$')
 
-              def kubernetes_get(path, query=None):
-                  namespace = os.environ["POD_NAMESPACE"]
-                  url = f'https://kubernetes.default.svc/api/v1/namespaces/{namespace}/{path}'
-                  if query:
-                      url += '?' + urlencode(query)
-                  with open('/var/run/secrets/kubernetes.io/serviceaccount/token', encoding='utf-8') as file:
-                      token = file.read()
-                  req = Request(url, headers={"Authorization": f"Bearer {token}"})
-                  context = ssl.create_default_context(
-                      cafile='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
-                  )
-                  try:
-                      with urlopen(req, context=context, timeout=30) as response:
-                          return json.load(response)
-                  except HTTPError as error:
-                      raise ValueError(f'Kubernetes API {path}: HTTP {error.code}') from error
+              github_headers = {"Accept": "application/vnd.github+json", "User-Agent": "parseable-helm-alerts"}
 
-              def secret_value(title, ref, field):
+              def github_request(endpoint, token):
+                  headers = dict(github_headers)
+                  headers["Authorization"] = f"Bearer {token}"
+                  url = "https://api.github.com" + endpoint
+                  for attempt in range(3):
+                      try:
+                          with urlopen(Request(url, headers=headers), timeout=30) as response:
+                              return json.load(response)
+                      except HTTPError as error:
+                          if error.code in (429, 500, 502, 503, 504) and attempt < 2:
+                              time.sleep(2 ** attempt)
+                              continue
+                          if error.code == 404:
+                              raise ValueError("GitHub repository, ref, or alert folder was not found; for private repositories check token access") from error
+                          if error.code in (401, 403):
+                              raise ValueError(f"GitHub returned HTTP {error.code}; check the token's Contents read permission and API rate limit") from error
+                          raise ValueError(f"GitHub API returned HTTP {error.code} while reading alerts") from error
+                      except URLError as error:
+                          if attempt < 2:
+                              time.sleep(2 ** attempt)
+                              continue
+                          raise ValueError("cannot reach GitHub to read alerts") from error
+
+              def github_repo_path(repository):
+                  parsed = urlparse(repository)
+                  parts = parsed.path.strip("/").removesuffix(".git").split("/")
+                  if (parsed.scheme != "https" or parsed.netloc != "github.com" or
+                      parsed.username or parsed.password or parsed.query or parsed.fragment or
+                      len(parts) != 2 or not all(parts)):
+                      raise ValueError("alerts.git.repository must be https://github.com/OWNER/REPO")
+                  return "/repos/" + "/".join(quote(part, safe="") for part in parts)
+
+              def discover_git_alerts():
+                  token = os.environ.get("ALERT_GIT_TOKEN", "").strip()
+                  if not token:
+                      raise ValueError(f"alert GitHub token Secret {os.environ['ALERT_GIT_SECRET_NAME']!r} is missing key {os.environ['ALERT_GIT_SECRET_KEY']!r} or its value is empty")
+                  repo = github_repo_path(os.environ["ALERT_GIT_REPOSITORY"])
+                  ref = os.environ["ALERT_GIT_REF"]
+                  folder = os.environ["ALERT_GIT_PATH"].strip("/")
+                  if not folder or any(part in (".", "..") for part in folder.split("/")):
+                      raise ValueError("alerts.git.path must be a folder inside the repository")
+                  commit = github_request(f"{repo}/commits/{quote(ref, safe='')}", token)
+                  sha = commit.get("sha") if isinstance(commit, dict) else None
+                  if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+                      raise ValueError("GitHub did not return a valid commit for alerts.git.ref")
+                  print(f"Reading alerts from GitHub commit {sha[:12]}", flush=True)
+                  paths, pending = [], [folder]
+                  directories_seen = 0
+                  while pending:
+                      directories_seen += 1
+                      if directories_seen > 100:
+                          raise ValueError("alert folder contains too many directories")
+                      directory = pending.pop()
+                      endpoint = f"{repo}/contents/{quote(directory, safe='/')}?{urlencode({'ref': sha})}"
+                      entries = github_request(endpoint, token)
+                      if not isinstance(entries, list):
+                          raise ValueError(f"GitHub path {directory!r} is not a directory")
+                      if len(entries) >= 1000:
+                          raise ValueError(f"GitHub directory {directory!r} has too many entries to list safely")
+                      for entry in entries:
+                          entry_type, entry_path = entry.get("type"), entry.get("path")
+                          if not isinstance(entry_path, str):
+                              raise ValueError("GitHub returned an invalid alert path")
+                          if entry_type == "dir":
+                              pending.append(entry_path)
+                          elif entry_type == "file" and entry_path.lower().endswith(".json"):
+                              blob_sha = entry.get("sha")
+                              if not isinstance(blob_sha, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha):
+                                  raise ValueError(f"GitHub returned an invalid file ID for {entry_path!r}")
+                              paths.append((entry_path, blob_sha))
+                          elif entry_type not in ("file", "dir"):
+                              raise ValueError(f"unsupported GitHub entry in alert folder: {entry_path}")
+                          if len(paths) > 1000 or len(pending) > 100:
+                              raise ValueError("alert folder contains too many files or directories")
+                  if not paths:
+                      raise ValueError("alert folder has no .json files; no alerts were changed")
+
+                  def read_blob(item):
+                      file_path, blob_sha = item
+                      file = github_request(f"{repo}/git/blobs/{blob_sha}", token)
+                      if (not isinstance(file, dict) or file.get("encoding") != "base64" or
+                          not isinstance(file.get("sha"), str) or file["sha"].lower() != blob_sha.lower() or
+                          not isinstance(file.get("content"), str)):
+                          raise ValueError(f"cannot read alert JSON {file_path!r} from GitHub")
+                      try:
+                          content = base64.b64decode("".join(file["content"].split()), validate=True)
+                          alert = json.loads(content)
+                      except (binascii.Error, UnicodeError, json.JSONDecodeError) as error:
+                          raise ValueError(f"GitHub file {file_path!r} has invalid JSON: {error}") from error
+                      if not isinstance(alert, dict):
+                          raise ValueError(f"GitHub file {file_path!r} must contain a JSON object")
+                      return file_path, alert
+
+                  with ThreadPoolExecutor(max_workers=4) as pool:
+                      return list(pool.map(read_blob, sorted(paths)))
+
+              def secret_value(title, ref, field, index):
                   if not isinstance(ref, dict) or not ref.get("name") or not ref.get("key"):
                       raise ValueError(f'target {title!r}: {field}SecretRef needs name and key')
-                  secret_name, secret_key = ref["name"], ref["key"]
-                  secret = kubernetes_get('secrets/' + quote(secret_name, safe=''))
-                  encoded = secret.get("data", {}).get(secret_key)
-                  if not encoded:
+                  value = os.environ.get(f'TARGET_{field.upper()}_{index}')
+                  if not value:
                       raise ValueError(
-                          f'target {title!r}: Secret {secret_name!r} has no {secret_key!r} field'
+                          f'target {title!r}: Secret {ref["name"]!r} has no {ref["key"]!r} field or it is empty'
                       )
-                  try:
-                      return base64.b64decode(encoded, validate=True).decode('utf-8')
-                  except (binascii.Error, ValueError, UnicodeDecodeError) as error:
-                      raise ValueError(
-                          f'target {title!r}: Secret {secret_name!r} field {secret_key!r} is invalid'
-                      ) from error
+                  return value
 
-              def target_from_values(data):
+              def target_from_values(data, index):
                   if not isinstance(data, dict):
                       raise ValueError('each targets entry must be an object')
                   title, kind, id = data.get("title"), data.get("type"), data.get("id")
@@ -157,7 +263,7 @@ spec:
                   unknown = set(data) - allowed
                   if unknown:
                       raise ValueError(f'target {title!r}: unknown field(s): {", ".join(sorted(unknown))}')
-                  endpoint = secret_value(title, data.get("endpointSecretRef"), "endpoint").strip()
+                  endpoint = secret_value(title, data.get("endpointSecretRef"), "endpoint", index).strip()
                   if not endpoint:
                       raise ValueError(f'target {title!r}: endpoint Secret field is empty')
                   # The UI calls this field Title; the Parseable API calls it name.
@@ -182,8 +288,8 @@ spec:
                       if bool(username_ref) != bool(password_ref):
                           raise ValueError(f'target {title!r}: usernameSecretRef and passwordSecretRef must be set together')
                       if username_ref:
-                          username = secret_value(title, username_ref, "username")
-                          password = secret_value(title, password_ref, "password")
+                          username = secret_value(title, username_ref, "username", index)
+                          password = secret_value(title, password_ref, "password", index)
                           if not username.strip() or not password:
                               raise ValueError(f'target {title!r}: AlertManager username and password Secret fields must not be empty')
                           target["username"] = username
@@ -191,11 +297,12 @@ spec:
                   return target
 
               def discover():
+                  git_alerts = discover_git_alerts() if os.environ["ALERTS_ENABLED"] == "true" else []
                   configured_targets = []
                   seen_target_names = set()
                   seen_target_ids = set()
-                  for data in json.loads(os.environ["CONFIGURED_TARGETS"]):
-                      target = target_from_values(data)
+                  for index, data in enumerate(json.loads(os.environ["CONFIGURED_TARGETS"])):
+                      target = target_from_values(data, index)
                       if target["name"] in seen_target_names:
                           raise ValueError(f'duplicate target title {target["name"]!r} in values')
                       if target["id"] in seen_target_ids:
@@ -204,46 +311,33 @@ spec:
                       seen_target_ids.add(target["id"])
                       configured_targets.append((target["name"], target))
 
-                  alerts = []
+                  configured_alerts = []
                   if os.environ["ALERTS_ENABLED"] != "true":
-                      return configured_targets, alerts
-                  selector = f'{os.environ["ALERT_LABEL"]}={os.environ["ALERT_LABEL_VALUE"]}'
-                  configmaps = kubernetes_get('configmaps', {"labelSelector": selector})["items"]
-                  seen_titles = set()
-                  seen_alert_ids = set()
-                  for configmap in configmaps:
-                      name = configmap["metadata"]["name"]
-                      data = configmap.get("data", {})
-                      if "alert.json" not in data:
-                          raise ValueError(f'ConfigMap {name!r}: alert.json is required; define targets under parseable.targets in Helm values')
-                      try:
-                          alert = json.loads(data["alert.json"])
-                      except json.JSONDecodeError as error:
-                          raise ValueError(f'ConfigMap {name!r} field alert.json has invalid JSON: {error}') from error
-                      if not isinstance(alert, dict):
-                          raise ValueError(f'ConfigMap {name!r} field alert.json must be a JSON object')
+                      return configured_targets, configured_alerts
+                  seen_titles, seen_alert_ids = set(), set()
+                  for file_path, alert in git_alerts:
                       title = alert.get("title")
                       if not isinstance(title, str) or not title.strip():
-                          raise ValueError(f'ConfigMap {name!r}: alert title is required')
+                          raise ValueError(f'GitHub file {file_path!r}: alert title is required')
                       alert_id = alert.get("id")
                       if "id" in alert and (not isinstance(alert_id, str) or not ulid_pattern.fullmatch(alert_id)):
-                          raise ValueError(f'ConfigMap {name!r}: alert id must be a canonical 26-character ULID starting with 0-7')
+                          raise ValueError(f'GitHub file {file_path!r}: alert id must be a canonical 26-character ULID starting with 0-7')
                       if alert_id is not None:
                           if alert_id in seen_alert_ids:
-                              raise ValueError(f'duplicate alert id {alert_id!r} in selected ConfigMaps')
+                              raise ValueError(f'duplicate alert id {alert_id!r} in GitHub folder')
                           seen_alert_ids.add(alert_id)
                       if title in seen_titles:
-                          raise ValueError(f'duplicate alert title {title!r} in selected ConfigMaps')
+                          raise ValueError(f'duplicate alert title {title!r} in GitHub folder')
                       seen_titles.add(title)
-                      alert_target_ids = alert.get("targets")
-                      if not isinstance(alert_target_ids, list) or not alert_target_ids or any(
-                          not isinstance(target, str) or not ulid_pattern.fullmatch(target) for target in alert_target_ids
+                      target_ids = alert.get("targets")
+                      if not isinstance(target_ids, list) or not target_ids or any(
+                          not isinstance(target, str) or not ulid_pattern.fullmatch(target) for target in target_ids
                       ):
-                          raise ValueError(f'ConfigMap {name!r}: targets must be a nonempty list of target ULIDs')
-                      if len(alert_target_ids) != len(set(alert_target_ids)):
-                          raise ValueError(f'ConfigMap {name!r}: targets contains duplicate target IDs')
-                      alerts.append((name, alert))
-                  return configured_targets, alerts
+                          raise ValueError(f'GitHub file {file_path!r}: targets must be a nonempty list of target ULIDs')
+                      if len(target_ids) != len(set(target_ids)):
+                          raise ValueError(f'GitHub file {file_path!r}: targets contains duplicate target IDs')
+                      configured_alerts.append((file_path, alert))
+                  return configured_targets, configured_alerts
 
               def request(method, endpoint, payload=None):
                   body = None if payload is None else json.dumps(payload).encode()
@@ -275,8 +369,21 @@ spec:
                           return alerts
                       offset += len(page)
 
+              def wait_for_api():
+                  deadline = time.monotonic() + 120
+                  url = base + "/api/v1/readiness"
+                  while True:
+                      try:
+                          with urlopen(url, timeout=5):
+                              return
+                      except (HTTPError, URLError, TimeoutError):
+                          if time.monotonic() >= deadline:
+                              raise ValueError("Parseable API did not become ready within 120 seconds")
+                          time.sleep(5)
+
               try:
                   configured_targets, configured_alerts = discover()
+                  wait_for_api()
                   manage_targets = os.environ["MANAGE_TARGETS"] == "true"
                   manage_alerts = os.environ["ALERTS_ENABLED"] == "true"
                   desired_target_ids = {target["id"] for _, target in configured_targets}
@@ -318,7 +425,7 @@ spec:
 
                   changes = []
                   seen_resolved_ids = set()
-                  for configmap_name, alert in configured_alerts:
+                  for file_path, alert in configured_alerts:
                       title = alert["title"]
                       requested_id = alert.get("id")
                       title_matches = alerts_by_title.get(title, [])
@@ -333,7 +440,7 @@ spec:
                           raise ValueError(f'alert title {title!r} already belongs to another alert')
                       if alert_id is not None:
                           if alert_id in seen_resolved_ids:
-                              raise ValueError(f'alert id {alert_id!r} is selected by more than one ConfigMap')
+                              raise ValueError(f'alert id {alert_id!r} is selected by more than one GitHub file')
                           seen_resolved_ids.add(alert_id)
                       missing = [id for id in alert["targets"] if id not in targets_by_id]
                       if missing:
@@ -347,7 +454,6 @@ spec:
                       payload = dict(alert)
                       for field in ("version", "state", "notificationState", "created", "lastTriggeredAt"):
                           payload.pop(field, None)
-                      payload.pop("parseableHelmConfigMap", None)
                       if alert_id is not None:
                           payload["id"] = alert_id
                       changes.append((title, existing is not None, alert_id, payload))
@@ -420,14 +526,46 @@ spec:
               value: {{ ternary "true" "false" (hasKey $p "targets") | quote }}
             - name: ALERTS_ENABLED
               value: {{ ternary "true" "false" (default false $alerts.enabled) | quote }}
-            - name: ALERT_LABEL
-              value: {{ default "" $alerts.label | quote }}
-            - name: ALERT_LABEL_VALUE
-              value: {{ default "" $alerts.labelValue | quote }}
-            - name: POD_NAMESPACE
+            {{- if $alerts.enabled }}
+            - name: ALERT_GIT_REPOSITORY
+              value: {{ $alerts.git.repository | quote }}
+            - name: ALERT_GIT_REF
+              value: {{ $alerts.git.ref | quote }}
+            - name: ALERT_GIT_PATH
+              value: {{ $alerts.git.path | quote }}
+            - name: ALERT_GIT_SECRET_NAME
+              value: {{ $alerts.git.secretKeyRef.name | quote }}
+            - name: ALERT_GIT_SECRET_KEY
+              value: {{ $alerts.git.secretKeyRef.key | quote }}
+            - name: ALERT_GIT_TOKEN
               valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
+                secretKeyRef:
+                  name: {{ $alerts.git.secretKeyRef.name | quote }}
+                  key: {{ $alerts.git.secretKeyRef.key | quote }}
+                  optional: true
+            {{- end }}
+            {{- range $index, $item := $targets }}
+            - name: TARGET_ENDPOINT_{{ $index }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $item.endpointSecretRef.name | quote }}
+                  key: {{ $item.endpointSecretRef.key | quote }}
+                  optional: true
+            {{- if and (eq $item.type "alertManager") $item.usernameSecretRef }}
+            - name: TARGET_USERNAME_{{ $index }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $item.usernameSecretRef.name | quote }}
+                  key: {{ $item.usernameSecretRef.key | quote }}
+                  optional: true
+            - name: TARGET_PASSWORD_{{ $index }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $item.passwordSecretRef.name | quote }}
+                  key: {{ $item.passwordSecretRef.key | quote }}
+                  optional: true
+            {{- end }}
+            {{- end }}
             - name: PARSEABLE_BASE_URL
               value: {{ printf "http://%s.%s" $target .Release.Namespace | quote }}
             - name: P_USERNAME
