@@ -350,6 +350,20 @@ spec:
                           content = response.read()
                   except HTTPError as error:
                       # A proxy may echo Secret-backed target fields in its response.
+                      if method in ("POST", "PUT") and endpoint.startswith("/api/v1/alerts") and error.code == 400:
+                          detail = error.read(2048).decode(errors="replace")
+                          missing = re.search(r"table ['\"](?:datafusion\.public\.)?([^'\"]+)['\"] not found", detail, re.IGNORECASE)
+                          if missing:
+                              title = payload.get("title") if isinstance(payload, dict) else None
+                              datasets = payload.get("datasets") if isinstance(payload, dict) else None
+                              if isinstance(datasets, list) and missing.group(1) in datasets:
+                                  issue = f'dataset {missing.group(1)!r} is not available for queries'
+                              else:
+                                  issue = 'the query references a dataset that is not available for queries'
+                              raise ValueError(
+                                  f'alert {title!r}: {issue}; '
+                                  'check the query and datasets in alert.json, then rerun Helm'
+                              ) from error
                       raise ValueError(f'{method} {endpoint}: HTTP {error.code}') from error
                   except URLError as error:
                       raise ValueError(f'{method} {endpoint}: {error.reason}') from error
@@ -475,7 +489,7 @@ spec:
 
                   for target_id in replacement_ids:
                       request("DELETE", f'/api/v1/targets/{target_id}')
-                      print(f'Deleted old target ID: {target_id}')
+                      print(f'Deleted old target ID: {target_id}', file=sys.stderr, flush=True)
 
                   for name, exists, target in target_changes:
                       if exists:
@@ -487,7 +501,7 @@ spec:
                               f'target {name!r}: server did not return the requested id and title; '
                               'deploy the Parseable image with stable target ID support'
                           )
-                      print(f'{"Updated" if exists else "Created"} target: {name}')
+                      print(f'{"Updated" if exists else "Created"} target: {name}', file=sys.stderr, flush=True)
 
                   for title, exists, alert_id, payload in changes:
                       if exists:
@@ -502,22 +516,22 @@ spec:
                           raise ValueError(
                               f'alert {title!r}: server did not return the expected id and title'
                           )
-                      print(f'{action} alert: {title}')
+                      print(f'{action} alert: {title}', file=sys.stderr, flush=True)
 
                   if manage_alerts:
                       for alert_id, alert in alerts_by_id.items():
                           if alert_id not in seen_resolved_ids:
                               request("DELETE", f'/api/v1/alerts/{alert_id}')
-                              print(f'Deleted alert: {alert["title"]}')
+                              print(f'Deleted alert: {alert["title"]}', file=sys.stderr, flush=True)
 
                   if manage_targets:
                       for item in targets_response:
                           target = item["target"]
                           if target["id"] not in desired_target_ids and target["id"] not in replacement_ids:
                               request("DELETE", f'/api/v1/targets/{target["id"]}')
-                              print(f'Deleted target: {target["name"]}')
+                              print(f'Deleted target: {target["name"]}', file=sys.stderr, flush=True)
               except Exception as error:
-                  print(f"ERROR: {error}", file=sys.stderr)
+                  print(f"ERROR: {error}", file=sys.stderr, flush=True)
                   sys.exit(1)
           env:
             - name: CONFIGURED_TARGETS
