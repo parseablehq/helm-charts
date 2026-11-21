@@ -1,0 +1,56 @@
+# yaml-language-server: $schema=../charts/parseable/values.schema.json
+# OSS distributed: separate ingestor and querier pods using S3-compatible storage.
+# Create parseable-env-secret with addr, username, password, and the S3 credentials.
+# Replace <storage-class> with the desired StorageClass for the ingestor PVCs.
+
+parseable:
+  deploymentMode: distributed
+
+  image:
+    repository: quay.io/parseablehq/parseable
+    tag: "" # Defaults to the Helm chart appVersion
+    pullPolicy: Always
+
+  store:
+    # MinIO and Amazon S3: s3-store
+    # Google Cloud Storage: gcs-store
+    # Azure Blob Storage: blob-store
+    type: s3-store
+    secretName: parseable-env-secret
+    # Google Cloud Storage only: uncomment this block.
+    # gcsCredentials:
+    #   secretName: parseable-gcs-key
+    #   secretKey: key.json
+    #   mountPath: /var/secrets/google
+
+  distributed:
+    ingestor:
+      replicas: 1
+      env:
+        RUST_LOG: warn
+      resources:
+        requests:
+          cpu: 1
+          memory: 512Mi
+        limits:
+          cpu: 2
+          memory: 2Gi
+      persistence:
+        staging:
+          enabled: true
+          storageClass: <storage-class>
+          accessMode: ReadWriteOnce
+          size: 5Gi
+
+    querier:
+      replicas: 1
+      env:
+        RUST_LOG: warn
+      resources:
+        requests:
+          cpu: 1
+          memory: 512Mi
+        limits:
+          cpu: 2
+          memory: 2Gi
+

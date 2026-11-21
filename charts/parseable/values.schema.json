@@ -58,11 +58,11 @@
               }
             },
             "license": {
-              "description": "Enterprise license data and signature loaded from Kubernetes Secrets at startup.",
+              "description": "Omit for the built-in 50 GB license (v3.2.7+); set secretName and dataKey for the license API Job; add signature for legacy mounted files.",
               "properties": {
-                "secretName": {"description": "Existing Secret containing the Enterprise license JSON and, for file mode, its signature."},
+                "secretName": {"description": "Existing Secret containing the combined license JSON or legacy license files. Required whenever license is configured."},
                 "mountPath": {"description": "Directory where the license files are mounted read-only inside each Enterprise pod."},
-                "dataKey": {"description": "Filename/Secret field containing the license JSON data."},
+                "dataKey": {"description": "Secret field containing the license JSON. Required whenever license is configured."},
                 "signature": {
                   "description": "How the Enterprise license signature is provided.",
                   "properties": {
@@ -192,14 +192,27 @@
         },
         "dashboards": {
           "type": "object",
-          "description": "Reconcile dashboards from ConfigMaps in this release's namespace matching label=labelValue. Each ConfigMap must contain exactly one .json field; its metadata.name becomes the dashboard title. When enabled, dashboards absent from matching ConfigMaps are deleted. A selector with no matches deletes all existing dashboards.",
-          "required": ["enabled"],
+          "description": "Reconcile dashboards from a GitHub folder. The folder is the complete desired dashboard list; dashboards absent from it are deleted.",
           "properties": {
             "enabled": {"type": "boolean", "description": "Run the dashboard reconciliation Job on Helm install and upgrade. False leaves existing dashboards untouched."},
-            "label": {"type": "string", "minLength": 1, "description": "Kubernetes label key on dashboard ConfigMaps, for example parseable_dashboard."},
-            "labelValue": {"type": "string", "minLength": 1, "description": "Required label value. Only ConfigMaps with label=labelValue are imported."}
-          },
-          "additionalProperties": false
+            "git": {
+              "type": "object",
+              "description": "Read dashboard JSON files from this GitHub folder on each Helm install or upgrade. The filename without .json becomes the dashboard title. All other Parseable dashboards are deleted after successful import.",
+              "properties": {
+                "repository": {"type": "string", "pattern": "^https://github\\.com/[^/]+/[^/]+/?$", "description": "GitHub repository URL, for example https://github.com/company/observability-config.git."},
+                "ref": {"type": "string", "minLength": 1, "description": "Git branch, tag, or commit SHA to read."},
+                "path": {"type": "string", "minLength": 1, "description": "Directory inside the repository containing dashboard .json files. Subdirectories are included."},
+                "secretKeyRef": {
+                  "type": "object",
+                  "description": "Required Kubernetes Secret containing a GitHub token with repository Contents read permission, for both public and private repositories.",
+                  "properties": {
+                    "name": {"type": "string", "minLength": 1},
+                    "key": {"type": "string", "minLength": 1}
+                  }
+                }
+              }
+            }
+          }
         },
         "targets": {
           "type": "array",
@@ -249,14 +262,27 @@
         },
         "alerts": {
           "type": "object",
-          "description": "Reconcile alerts from ConfigMaps matching label=labelValue. Alert id is optional; target ULIDs are required. Alerts absent from the selected ConfigMaps are deleted, including when none match.",
-          "required": ["enabled"],
+          "description": "Reconcile alerts from a GitHub folder. Alert id is optional; target ULIDs are required. Alerts absent from Git are deleted.",
           "properties": {
             "enabled": {"type": "boolean", "description": "Run alert reconciliation on Helm install and upgrade. False leaves alerts untouched."},
-            "label": {"type": "string", "minLength": 1, "description": "Kubernetes label key used to select alert ConfigMaps."},
-            "labelValue": {"type": "string", "minLength": 1, "description": "Kubernetes label value used to select alert ConfigMaps."}
-          },
-          "additionalProperties": false
+            "git": {
+              "type": "object",
+              "description": "Read exported alert JSON files from this GitHub folder on each Helm install or upgrade.",
+              "properties": {
+                "repository": {"type": "string", "pattern": "^https://github\\.com/[^/]+/[^/]+/?$", "description": "GitHub repository URL."},
+                "ref": {"type": "string", "minLength": 1, "description": "Git branch, tag, or commit SHA to read."},
+                "path": {"type": "string", "minLength": 1, "description": "Directory inside the repository containing alert .json files. Subdirectories are included."},
+                "secretKeyRef": {
+                  "type": "object",
+                  "description": "Required Kubernetes Secret containing a GitHub token with repository Contents read permission.",
+                  "properties": {
+                    "name": {"type": "string", "minLength": 1},
+                    "key": {"type": "string", "minLength": 1}
+                  }
+                }
+              }
+            }
+          }
         },
         "distributed": {
           "type": "object",

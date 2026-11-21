@@ -1,10 +1,41 @@
 {{- $p := .Values.parseable }}
-{{- if and $p.dashboards $p.dashboards.enabled }}
-{{- if not $p.dashboards.label }}
-  {{- fail "dashboards.label is required when dashboards.enabled is true" }}
+{{- if hasKey $p "dashboards" }}
+  {{- range $field := keys $p.dashboards }}
+    {{- if not (has $field (list "enabled" "git")) }}
+      {{- fail (printf "Unknown parseable.dashboards field %q. Use enabled and git" $field) }}
+    {{- end }}
+  {{- end }}
+  {{- if not (hasKey $p.dashboards "enabled") }}
+    {{- fail "parseable.dashboards.enabled is required; check its spelling in values" }}
+  {{- end }}
 {{- end }}
-{{- if not $p.dashboards.labelValue }}
-  {{- fail "dashboards.labelValue is required when dashboards.enabled is true" }}
+{{- if and $p.dashboards $p.dashboards.enabled }}
+{{- if not $p.dashboards.git }}
+  {{- fail "dashboards.git is required when dashboards.enabled is true" }}
+{{- end }}
+{{- $git := $p.dashboards.git }}
+{{- range $field := keys $git }}
+  {{- if not (has $field (list "repository" "ref" "path" "secretKeyRef")) }}
+    {{- fail (printf "Unknown dashboards.git field %q. Use repository, ref, path, or secretKeyRef" $field) }}
+  {{- end }}
+{{- end }}
+{{- range $field := list "repository" "ref" "path" }}
+  {{- if not (index $git $field) }}
+    {{- fail (printf "dashboards.git.%s is required; check its spelling in values" $field) }}
+  {{- end }}
+{{- end }}
+{{- if not $git.secretKeyRef }}
+  {{- fail "dashboards.git.secretKeyRef is required; check its spelling in values" }}
+{{- end }}
+{{- range $field := keys $git.secretKeyRef }}
+  {{- if not (has $field (list "name" "key")) }}
+    {{- fail (printf "Unknown dashboards.git.secretKeyRef field %q. Use name and key" $field) }}
+  {{- end }}
+{{- end }}
+{{- range $field := list "name" "key" }}
+  {{- if not (index $git.secretKeyRef $field) }}
+    {{- fail (printf "dashboards.git.secretKeyRef.%s is required; check its spelling in values" $field) }}
+  {{- end }}
 {{- end }}
 {{- $fullname := include "parseable.fullname" . }}
 {{- $target := printf "%s-querier-service" $fullname }}
@@ -34,10 +65,9 @@ spec:
         {{- include "parseable.labels" . | nindent 8 }}
     spec:
       restartPolicy: Never
-      serviceAccountName: {{ $fullname }}-dashboards
+      automountServiceAccountToken: false
       securityContext:
         {{- toYaml $p.podSecurityContext | nindent 8 }}
-      {{- include "parseable.waitForApi" . | nindent 6 }}
       containers:
         - name: import-dashboards
           image: docker.io/library/python:3.12-alpine
@@ -45,135 +75,335 @@ spec:
           command: ["python", "-c"]
           args:
             - |-
+              """Reconcile Parseable dashboards from a GitHub directory."""
+
               import base64
+              import binascii
               import json
               import os
+              import re
               import secrets
-              import ssl
               import sys
               import time
-              from urllib.error import HTTPError
-              from urllib.parse import urlencode
+              from concurrent.futures import ThreadPoolExecutor
+              from urllib.error import HTTPError, URLError
+              from urllib.parse import quote, urlencode, urlparse
               from urllib.request import Request, urlopen
 
-              base = os.environ["PARSEABLE_BASE_URL"].rstrip("/")
-              auth = base64.b64encode(
+
+              BASE = os.environ["PARSEABLE_BASE_URL"].rstrip("/")
+              AUTH = base64.b64encode(
                   f'{os.environ["P_USERNAME"]}:{os.environ["P_PASSWORD"]}'.encode()
               ).decode()
-              path = "/api/v1/dashboards"
-              alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+              API_PATH = "/api/v1/dashboards"
+              ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+              GITHUB_HEADERS = {
+                  "Accept": "application/vnd.github+json",
+                  "User-Agent": "parseable-helm-dashboards",
+              }
 
-              def discover():
-                  selector = f'{os.environ["DASHBOARD_LABEL"]}={os.environ["DASHBOARD_LABEL_VALUE"]}'
-                  namespace = os.environ["POD_NAMESPACE"]
-                  url = (
-                      f'https://kubernetes.default.svc/api/v1/namespaces/{namespace}/configmaps?'
-                      + urlencode({"labelSelector": selector})
-                  )
-                  with open('/var/run/secrets/kubernetes.io/serviceaccount/token', encoding='utf-8') as file:
-                      token = file.read()
-                  req = Request(url, headers={"Authorization": f"Bearer {token}"})
-                  context = ssl.create_default_context(
-                      cafile='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
-                  )
-                  try:
-                      with urlopen(req, context=context, timeout=30) as response:
-                          configmaps = json.load(response)["items"]
-                  except HTTPError as error:
-                      raise ValueError(
-                          f'cannot list dashboard ConfigMaps: Kubernetes API returned HTTP {error.code}'
-                      ) from error
-                  configured = []
-                  for configmap in configmaps:
-                      name = configmap["metadata"]["name"]
-                      files = sorted(
-                          (key, content) for key, content in configmap.get("data", {}).items()
-                          if key.endswith(".json")
-                      )
-                      if len(files) != 1:
-                          raise ValueError(
-                              f'ConfigMap {name!r} must have exactly one dashboard .json field; '
-                              f'found {len(files)}'
-                          )
-                      key, content = files[0]
-                      try:
-                          imported = json.loads(content)
-                      except json.JSONDecodeError as error:
-                          raise ValueError(
-                              f'ConfigMap {name!r} field {key!r} contains invalid JSON: {error}'
-                          ) from error
-                      if not isinstance(imported, dict):
-                          raise ValueError(f'ConfigMap {name!r} field {key!r} must contain a JSON object')
-                      configured.append((name, imported))
-                  return configured
-
-              def request(method, endpoint, payload=None):
-                  body = None if payload is None else json.dumps(payload).encode()
-                  headers = {"Authorization": f"Basic {auth}"}
-                  if body is not None:
-                      headers["Content-Type"] = "application/json"
-                  req = Request(base + endpoint, data=body, headers=headers, method=method)
-                  with urlopen(req, timeout=30) as response:
-                      content = response.read()
-                  if method == "DELETE":
-                      return None
-                  return json.loads(content) if content else None
 
               def new_ulid():
                   value = ((time.time_ns() // 1_000_000) & ((1 << 48) - 1)) << 80
                   value |= secrets.randbits(80)
                   chars = []
                   for _ in range(26):
-                      chars.append(alphabet[value & 31])
+                      chars.append(ALPHABET[value & 31])
                       value >>= 5
                   return "".join(reversed(chars))
 
-              try:
-                  configured = discover()
-                  existing_dashboards = request("GET", path)
-                  desired_titles = {title for title, _ in configured}
-                  existing = {
-                      item["title"]: item["dashboardId"]
-                      for item in existing_dashboards
-                  }
-                  for title, imported in configured:
-                      dashboard = {
-                          "title": title,
-                          "tiles": [
-                              dict(tile, tile_id=new_ulid())
-                              for tile in imported.get("tiles", [])
-                          ],
-                          "tags": imported.get("tags", []),
-                          "sections": imported.get("sections", []),
-                          "variables": imported.get("variables", []),
-                          "isFavorite": False,
-                      }
-                      if "timeRange" in imported:
-                          dashboard["timeRange"] = imported["timeRange"]
 
+              def api_request(method, endpoint, payload=None):
+                  body = None if payload is None else json.dumps(payload).encode()
+                  headers = {"Authorization": f"Basic {AUTH}"}
+                  if body is not None:
+                      headers["Content-Type"] = "application/json"
+                  req = Request(BASE + endpoint, data=body, headers=headers, method=method)
+                  try:
+                      with urlopen(req, timeout=30) as response:
+                          content = response.read()
+                  except HTTPError as error:
+                      if method == "PUT" and endpoint.startswith(API_PATH + "/") and error.code == 400:
+                          detail = error.read(512).decode(errors="replace")
+                          if "Dashboard does not exist or you do not have permission to access it" in detail:
+                              title = payload.get("title") if isinstance(payload, dict) else endpoint
+                              raise ValueError(
+                                  f"dashboard {title!r} cannot be updated by this account; "
+                                  "it may belong to another user. Update it as its owner or "
+                                  "remove it before applying Git dashboards"
+                              ) from error
+                      raise ValueError(f"Parseable {method} {endpoint} returned HTTP {error.code}") from error
+                  return json.loads(content) if method == "GET" and content else None
+
+
+              def read_json(content, source):
+                  try:
+                      value = json.loads(content)
+                  except (UnicodeError, json.JSONDecodeError) as error:
+                      raise ValueError(f"{source} contains invalid JSON: {error}") from error
+                  if not isinstance(value, dict):
+                      raise ValueError(f"{source} must contain a JSON object")
+                  return value
+
+
+              def github_request(endpoint, token):
+                  headers = dict(GITHUB_HEADERS)
+                  headers["Authorization"] = f"Bearer {token}"
+                  url = "https://api.github.com" + endpoint
+                  for attempt in range(3):
+                      try:
+                          with urlopen(Request(url, headers=headers), timeout=30) as response:
+                              return json.load(response)
+                      except HTTPError as error:
+                          if error.code in (429, 500, 502, 503, 504) and attempt < 2:
+                              time.sleep(2 ** attempt)
+                              continue
+                          if error.code == 404:
+                              raise ValueError(
+                                  "GitHub repository, ref, or dashboard folder was not found; "
+                                  "for private repositories check token access"
+                              ) from error
+                          if error.code in (401, 403):
+                              raise ValueError(
+                                  f"GitHub returned HTTP {error.code}; check the token's Contents read permission "
+                                  "and API rate limit"
+                              ) from error
+                          raise ValueError(f"GitHub API returned HTTP {error.code} while reading dashboards") from error
+                      except URLError as error:
+                          if attempt < 2:
+                              time.sleep(2 ** attempt)
+                              continue
+                          raise ValueError("cannot reach GitHub to read dashboards") from error
+
+
+              def github_repo_path(repository):
+                  parsed = urlparse(repository)
+                  parts = parsed.path.strip("/").removesuffix(".git").split("/")
+                  if (
+                      parsed.scheme != "https"
+                      or parsed.netloc != "github.com"
+                      or parsed.username
+                      or parsed.password
+                      or parsed.query
+                      or parsed.fragment
+                      or len(parts) != 2
+                      or not all(parts)
+                  ):
+                      raise ValueError("dashboards.git.repository must be https://github.com/OWNER/REPO")
+                  return "/repos/" + "/".join(quote(part, safe="") for part in parts)
+
+
+              def discover_github():
+                  repo = github_repo_path(os.environ["DASHBOARD_GIT_REPOSITORY"])
+                  ref = os.environ["DASHBOARD_GIT_REF"]
+                  folder = os.environ["DASHBOARD_GIT_PATH"].strip("/")
+                  token = os.environ.get("DASHBOARD_GIT_TOKEN", "").strip()
+                  if not token:
+                      raise ValueError(
+                          f"dashboard GitHub token Secret {os.environ['DASHBOARD_GIT_SECRET_NAME']!r} "
+                          f"is missing key {os.environ['DASHBOARD_GIT_SECRET_KEY']!r} or its value is empty"
+                      )
+                  if not folder or any(part in (".", "..") for part in folder.split("/")):
+                      raise ValueError("dashboards.git.path must be a folder inside the repository")
+
+                  # Pin every request to one commit, even if the branch moves during the Job.
+                  commit = github_request(f"{repo}/commits/{quote(ref, safe='')}", token)
+                  sha = commit.get("sha") if isinstance(commit, dict) else None
+                  if not isinstance(sha, str) or len(sha) != 40:
+                      raise ValueError("GitHub did not return a valid commit for dashboards.git.ref")
+                  print(f"Reading dashboards from GitHub commit {sha[:12]}", flush=True)
+
+                  paths = []
+                  pending = [folder]
+                  directories_seen = 0
+                  while pending:
+                      directories_seen += 1
+                      if directories_seen > 100:
+                          raise ValueError("dashboard folder contains too many directories")
+                      directory = pending.pop()
+                      endpoint = f"{repo}/contents/{quote(directory, safe='/')}?{urlencode({'ref': sha})}"
+                      entries = github_request(endpoint, token)
+                      if not isinstance(entries, list):
+                          raise ValueError(f"GitHub path {directory!r} is not a directory")
+                      if len(entries) >= 1000:
+                          raise ValueError(f"GitHub directory {directory!r} has too many entries to list safely")
+                      for entry in entries:
+                          entry_type, entry_path = entry.get("type"), entry.get("path")
+                          if not isinstance(entry_path, str):
+                              raise ValueError("GitHub returned an invalid dashboard path")
+                          if entry_type == "dir":
+                              pending.append(entry_path)
+                          elif entry_type == "file" and entry_path.lower().endswith(".json"):
+                              blob_sha = entry.get("sha")
+                              if not isinstance(blob_sha, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha):
+                                  raise ValueError(f"GitHub returned an invalid file ID for {entry_path!r}")
+                              paths.append((entry_path, blob_sha))
+                          elif entry_type not in ("file", "dir"):
+                              raise ValueError(f"unsupported GitHub entry in dashboard folder: {entry_path}")
+                          if len(paths) > 1000 or len(pending) > 100:
+                              raise ValueError("dashboard folder contains too many files or directories")
+
+                  if not paths:
+                      raise ValueError("dashboard folder has no .json files; no dashboards were changed")
+
+                  titles_by_path = {}
+                  titles_seen = set()
+                  for file_path, blob_sha in sorted(paths):
+                      title = os.path.basename(file_path)[:-5]
+                      if not title.strip():
+                          raise ValueError(f"dashboard filename {file_path!r} has no title")
+                      if title in titles_seen:
+                          raise ValueError(f"duplicate dashboard title {title!r} in GitHub folder")
+                      titles_seen.add(title)
+                      titles_by_path[file_path] = (title, blob_sha)
+
+                  def read_blob(item):
+                      file_path, (title, blob_sha) = item
+                      endpoint = f"{repo}/git/blobs/{blob_sha}"
+                      file = github_request(endpoint, token)
+                      if (
+                          not isinstance(file, dict)
+                          or file.get("encoding") != "base64"
+                          or not isinstance(file.get("sha"), str)
+                          or file["sha"].lower() != blob_sha.lower()
+                      ):
+                          raise ValueError(f"cannot read dashboard JSON {file_path!r} from GitHub")
+                      if not isinstance(file.get("content"), str):
+                          raise ValueError(f"GitHub returned no content for dashboard {file_path!r}")
+                      try:
+                          encoded = "".join(file["content"].split())
+                          content = base64.b64decode(encoded, validate=True)
+                      except (KeyError, TypeError, binascii.Error) as error:
+                          raise ValueError(f"GitHub returned invalid content for {file_path!r}") from error
+                      return title, read_json(content, f"GitHub file {file_path!r}")
+
+                  # Read files in parallel, but finish and validate every file before any API write.
+                  with ThreadPoolExecutor(max_workers=4) as pool:
+                      return dict(pool.map(read_blob, titles_by_path.items()))
+
+
+              def dashboard_payload(title, imported):
+                  if "tiles" not in imported:
+                      raise ValueError(f"dashboard {title!r}: tiles field is required in the exported JSON")
+                  tiles = imported["tiles"]
+                  if not isinstance(tiles, list) or any(not isinstance(tile, dict) for tile in tiles):
+                      raise ValueError(f"dashboard {title!r}: tiles must be a list of objects")
+                  dashboard = {
+                      "title": title,
+                      "tiles": [dict(tile) for tile in tiles],
+                      "tags": imported.get("tags") or [],
+                      "sections": imported.get("sections") or [],
+                      "variables": imported.get("variables") or [],
+                      "isFavorite": imported.get("isFavorite", False),
+                  }
+                  if "timeRange" in imported:
+                      dashboard["timeRange"] = imported["timeRange"]
+                  for field in ("tags", "sections", "variables"):
+                      if not isinstance(dashboard[field], list):
+                          raise ValueError(f"dashboard {title!r}: {field} must be a list")
+                  return dashboard
+
+
+              def comparable(dashboard):
+                  fields = ("title", "tiles", "tags", "sections", "variables", "isFavorite", "timeRange")
+                  result = {field: dashboard.get(field) for field in fields}
+                  result["tiles"] = [
+                      {key: value for key, value in tile.items() if key != "tile_id"}
+                      for tile in dashboard.get("tiles") or []
+                  ]
+                  for field in ("tags", "sections", "variables"):
+                      result[field] = result[field] or []
+                  return result
+
+
+              def prepare_tiles(desired, current=None):
+                  existing_tiles = (current or {}).get("tiles") or []
+                  for index, tile in enumerate(desired["tiles"]):
+                      if index < len(existing_tiles) and existing_tiles[index].get("tile_id"):
+                          tile["tile_id"] = existing_tiles[index]["tile_id"]
+                      else:
+                          tile["tile_id"] = new_ulid()
+
+
+              def reconcile(configured):
+                  desired = {title: dashboard_payload(title, data) for title, data in configured.items()}
+                  items = api_request("GET", API_PATH)
+                  if not isinstance(items, list):
+                      raise ValueError("Parseable returned an invalid dashboard list; no changes made")
+                  existing = {}
+                  for item in items:
+                      if not isinstance(item, dict) or not item.get("title") or not item.get("dashboardId"):
+                          raise ValueError("Parseable returned an incomplete dashboard list; no changes made")
+                      title = item["title"]
+                      if title in existing:
+                          raise ValueError(f"Parseable has duplicate dashboard title {title!r}; no changes made")
+                      existing[title] = item["dashboardId"]
+
+                  for title, payload in desired.items():
                       dashboard_id = existing.get(title)
                       if dashboard_id:
-                          request("PUT", f"{path}/{dashboard_id}", dashboard)
-                          print(f'Updated dashboard: {title}')
+                          current = api_request("GET", f"{API_PATH}/{dashboard_id}")
+                          if not isinstance(current, dict):
+                              raise ValueError(f"Parseable returned invalid dashboard {title!r}")
+                          if comparable(current) == comparable(payload):
+                              print(f"Unchanged dashboard: {title}", flush=True)
+                              continue
+                          prepare_tiles(payload, current)
+                          api_request("PUT", f"{API_PATH}/{dashboard_id}", payload)
+                          print(f"Updated dashboard: {title}", flush=True)
                       else:
-                          request("POST", path, dashboard)
-                          print(f'Created dashboard: {title}')
-                  for item in existing_dashboards:
-                      if item["title"] not in desired_titles:
-                          request("DELETE", f'{path}/{item["dashboardId"]}')
-                          print(f'Deleted dashboard: {item["title"]}')
-              except Exception as error:
-                  print(f"ERROR: {error}", file=sys.stderr)
-                  sys.exit(1)
+                          prepare_tiles(payload)
+                          api_request("POST", API_PATH, payload)
+                          print(f"Created dashboard: {title}", flush=True)
+
+                  for title, dashboard_id in existing.items():
+                      if title not in desired:
+                          api_request("DELETE", f"{API_PATH}/{dashboard_id}")
+                          print(f"Deleted dashboard: {title}", flush=True)
+
+
+              def wait_for_api():
+                  deadline = time.monotonic() + 120
+                  url = BASE + "/api/v1/readiness"
+                  while True:
+                      try:
+                          with urlopen(url, timeout=5):
+                              return
+                      except (HTTPError, URLError, TimeoutError):
+                          if time.monotonic() >= deadline:
+                              raise ValueError("Parseable API did not become ready within 120 seconds")
+                          time.sleep(5)
+
+
+              def main():
+                  configured = discover_github()
+                  wait_for_api()
+                  reconcile(configured)
+
+
+              if __name__ == "__main__":
+                  try:
+                      main()
+                  except Exception as error:
+                      print(f"ERROR: {error}", file=sys.stderr, flush=True)
+                      sys.exit(1)
           env:
-            - name: DASHBOARD_LABEL
-              value: {{ $p.dashboards.label | quote }}
-            - name: DASHBOARD_LABEL_VALUE
-              value: {{ $p.dashboards.labelValue | quote }}
-            - name: POD_NAMESPACE
+            - name: DASHBOARD_GIT_REPOSITORY
+              value: {{ $p.dashboards.git.repository | quote }}
+            - name: DASHBOARD_GIT_REF
+              value: {{ $p.dashboards.git.ref | quote }}
+            - name: DASHBOARD_GIT_PATH
+              value: {{ $p.dashboards.git.path | quote }}
+            - name: DASHBOARD_GIT_SECRET_NAME
+              value: {{ $p.dashboards.git.secretKeyRef.name | quote }}
+            - name: DASHBOARD_GIT_SECRET_KEY
+              value: {{ $p.dashboards.git.secretKeyRef.key | quote }}
+            - name: DASHBOARD_GIT_TOKEN
               valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
+                secretKeyRef:
+                  name: {{ $p.dashboards.git.secretKeyRef.name | quote }}
+                  key: {{ $p.dashboards.git.secretKeyRef.key | quote }}
+                  optional: true
             - name: PARSEABLE_BASE_URL
               value: {{ printf "http://%s.%s" $target .Release.Namespace | quote }}
             - name: P_USERNAME

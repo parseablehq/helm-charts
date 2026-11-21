@@ -159,7 +159,8 @@ helm install parseable ./ -n parseable -f overlays/azure.yaml
 
 ## Enterprise (adds prism)
 
-Stack `overlays/enterprise.yaml` on top of a store overlay, and create the license secret.
+Stack `overlays/enterprise.yaml` on top of a store overlay. The chart's default
+Enterprise image still requires the legacy license Secret:
 
 ```sh
 kubectl -n parseable create secret generic parseable-license \
@@ -172,6 +173,102 @@ kubectl -n parseable create secret generic parseable-cluster-secret \
 helm install parseable ./ -n parseable \
   -f overlays/aws.yaml -f overlays/enterprise.yaml
 ```
+
+For Enterprise image `v3.2.7` or newer, omit `license` to start with the
+built-in 50 GB license:
+
+```yaml
+parseable:
+  enterprise:
+    enabled: true
+    image:
+      tag: v3.2.7
+```
+
+To install a license JSON through the helm, create a Secret with the
+JSON file and set `secretName` and `dataKey`:
+
+```sh
+kubectl -n parseable create secret generic parseable-license \
+  --from-file=license.json=<path>/license.json
+```
+
+```yaml
+parseable:
+  enterprise:
+    image:
+      tag: v3.2.7
+    license:
+      secretName: parseable-license
+      dataKey: license.json
+```
+Images older than `v3.2.7` require this legacy configuration.
+
+The chart applies the provided file after the deployment starts. Enterprise
+nodes load the license from object storage. The file must be a single JSON
+object with base64-encoded `license` and `signature` fields. The credentials in
+the configured store Secret must belong to a super-admin in multi-tenant mode.
+
+For existing deployments, keep the legacy settings during an image-only upgrade.
+For a newer image, remove `signature` to apply a combined JSON through the API
+Job, or remove the entire `license` block to use the built-in default.
+
+## Dashboards from GitHub
+
+Commit exported dashboard JSON files under one directory in a GitHub repository,
+for example `dashboards/payments.json`. The filename (`payments`) becomes the
+dashboard title. The chart reads only that directory and its subdirectories;
+users do not need to clone the chart or create dashboard ConfigMaps.
+
+Store a GitHub token with **Contents: read** access in a Secret in the
+Parseable namespace, even for public repositories. Reference the Secret in
+values; do not put the token itself in values.
+
+```yaml
+parseable:
+  dashboards:
+    enabled: true
+    git:
+      repository: https://github.com/company/observability-config.git
+      ref: main
+      path: dashboards
+      secretKeyRef:
+        name: dashboard-git-access
+        key: token
+```
+
+The Job reads one commit snapshot on each Helm install or upgrade, validates
+every JSON file, then creates or updates dashboards by title. Dashboards absent
+from the Git directory are deleted, including dashboards created through the UI.
+A missing folder or a folder without `.json` files fails without deleting
+anything. Pushing to Git alone does not run the Job.
+
+## Alerts from GitHub
+
+Commit exported alert JSON files to a GitHub folder. Each JSON file's `title`
+sets the alert title; its filename can be anything ending in `.json`. Keep
+notification target IDs in the JSON `targets` list. Configure those targets
+with `parseable.targets` in values before applying alerts that use them.
+
+```yaml
+parseable:
+  alerts:
+    enabled: true
+    git:
+      repository: https://github.com/company/observability-config.git
+      ref: main
+      path: alerts
+      secretKeyRef:
+        name: observability-git-access
+        key: token
+```
+
+The token Secret needs GitHub **Contents: read** access, including for public
+repositories. The Job reads a single commit snapshot, validates every JSON
+file, then creates or updates alerts using the JSON title and optional ID.
+Alerts absent from Git are deleted, including UI-created alerts. A missing
+folder or one without `.json` files fails without deleting alerts. A Git push
+alone does not run the Job; run `helm upgrade` to apply changes.
 
 ## Upgrade / Uninstall
 
