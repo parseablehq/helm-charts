@@ -137,6 +137,8 @@ spec:
                   fieldPath: metadata.name
             - name: P_MODE
               value: "prism"
+            - name: P_PRISM_ENDPOINT
+              value: "$(HOSTNAME).{{ $fullname }}-prism-headless.{{ .Release.Namespace }}.svc.cluster.local:8000"
             - name: P_STAGING_DIR
               value: "/parseable/staging"
             - name: P_PROMQL_RESULTS_CACHE_DIR
