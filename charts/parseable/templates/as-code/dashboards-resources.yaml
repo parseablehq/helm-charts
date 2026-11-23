@@ -2,6 +2,7 @@
 {{- include "parseable.validateAsCodeSection" (dict "values" $p "section" "dashboards") }}
 {{- if and (hasKey $p "dashboards") (kindIs "map" $p.dashboards) $p.dashboards.enabled }}
 {{- $fullname := include "parseable.fullname" . }}
+{{- $readerRoleName := printf "%s-%s-dashboard-reader" $fullname .Release.Namespace }}
 {{- $byNamespace := dict }}
 {{- range $index, $item := $p.dashboards.items }}
   {{- if hasKey $item "json" }}
@@ -34,14 +35,11 @@ metadata:
   labels:
     {{- include "parseable.labels" . | nindent 4 }}
 {{- range $namespace, $names := $byNamespace }}
-{{- if and (ne $namespace $.Release.Namespace) (not (lookup "v1" "Namespace" "" $namespace)) }}
-  {{- fail (printf "dashboard ConfigMap namespace %q does not exist. Create it before upgrading, or correct parseable.dashboards[].namespace." $namespace) }}
-{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ $fullname }}-dashboard-reader
+  name: {{ $readerRoleName }}
   namespace: {{ $namespace }}
   labels:
     {{- include "parseable.labels" $ | nindent 4 }}
@@ -54,7 +52,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ $fullname }}-dashboard-reader
+  name: {{ $readerRoleName }}
   namespace: {{ $namespace }}
   labels:
     {{- include "parseable.labels" $ | nindent 4 }}
@@ -64,7 +62,7 @@ subjects:
     namespace: {{ $.Release.Namespace }}
 roleRef:
   kind: Role
-  name: {{ $fullname }}-dashboard-reader
+  name: {{ $readerRoleName }}
   apiGroup: rbac.authorization.k8s.io
 {{- end }}
 {{- end }}

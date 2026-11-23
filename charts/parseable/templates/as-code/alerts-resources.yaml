@@ -2,6 +2,7 @@
 {{- include "parseable.validateAsCodeSection" (dict "values" $p "section" "alerts") }}
 {{- if and (hasKey $p "alerts") (kindIs "map" $p.alerts) $p.alerts.enabled }}
 {{- $fullname := include "parseable.fullname" . }}
+{{- $readerRoleName := printf "%s-%s-alert-reader" $fullname .Release.Namespace }}
 {{- $byNamespace := dict }}
 {{- $seenInline := dict }}
 {{- range $index, $item := $p.alerts.items }}
@@ -40,7 +41,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ $fullname }}-alert-reader
+  name: {{ $readerRoleName }}
   namespace: {{ $namespace }}
   labels:
     {{- include "parseable.labels" $ | nindent 4 }}
@@ -53,7 +54,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ $fullname }}-alert-reader
+  name: {{ $readerRoleName }}
   namespace: {{ $namespace }}
   labels:
     {{- include "parseable.labels" $ | nindent 4 }}
@@ -63,7 +64,7 @@ subjects:
     namespace: {{ $.Release.Namespace }}
 roleRef:
   kind: Role
-  name: {{ $fullname }}-alert-reader
+  name: {{ $readerRoleName }}
   apiGroup: rbac.authorization.k8s.io
 {{- end }}
 {{- end }}
