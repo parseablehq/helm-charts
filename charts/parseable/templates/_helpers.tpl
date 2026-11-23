@@ -21,6 +21,86 @@ Create a default fully qualified app name.
 {{- end }}
 {{- end }}
 
+{{/* Give invalid as-code section shapes a useful error before Helm renders a Job. */}}
+{{- define "parseable.validateAsCodeSection" -}}
+{{- if and (hasKey .values .section) (not (kindIs "map" (index .values .section))) -}}
+  {{- fail (printf "parseable.%s must use enabled and items. Example: %s: {enabled: true, items: []}. Omit it or set enabled: false to skip." .section .section) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Give each inline dashboard a stable, readable ConfigMap name.
+The short hash distinguishes names that normalize to the same Kubernetes name.
+*/}}
+{{- define "parseable.inlineDashboardConfigMapName" -}}
+{{- if not (kindIs "string" .name) -}}
+  {{- fail (printf "dashboards[%d].name is required and must be a nonempty string." .index) -}}
+{{- end -}}
+{{- if not (trim .name) -}}
+  {{- fail (printf "dashboards[%d].name is required and cannot be blank." .index) -}}
+{{- end -}}
+{{- $fullname := include "parseable.fullname" .root -}}
+{{- $slug := regexReplaceAll "[^a-z0-9]+" (lower (trim .name)) "-" | trimAll "-" -}}
+{{- $slug = default "item" $slug | trunc 23 | trimSuffix "-" -}}
+{{- $hash := sha256sum (printf "%s/%s" $fullname (trim .name)) | trunc 8 -}}
+{{- printf "%s-dashboard-%s-%s" ($fullname | trunc 20 | trimSuffix "-") $slug $hash -}}
+{{- end -}}
+
+{{/* Name inline alert ConfigMaps from the item name or exported JSON title. */}}
+{{- define "parseable.inlineAlertConfigMapName" -}}
+{{- $title := "" -}}
+{{- if hasKey .item "name" -}}
+  {{- if or (not (kindIs "string" .item.name)) (not (trim .item.name)) -}}
+    {{- fail (printf "alerts[%d].name must be a nonempty string." .index) -}}
+  {{- end -}}
+  {{- $title = trim .item.name -}}
+{{- else -}}
+  {{- $alert := fromJson .item.json -}}
+  {{- if or (not (kindIs "map" $alert)) (and (hasKey $alert "Error") (eq (len $alert) 1)) -}}
+    {{- fail (printf "alerts[%d].json must contain a valid JSON object." .index) -}}
+  {{- end -}}
+  {{- $jsonTitle := get $alert "title" -}}
+  {{- if or (not (kindIs "string" $jsonTitle)) (not (trim $jsonTitle)) -}}
+    {{- fail (printf "alerts[%d].json must contain a nonempty title, or set the item name." .index) -}}
+  {{- end -}}
+  {{- $title = trim $jsonTitle -}}
+{{- end -}}
+{{- $fullname := include "parseable.fullname" .root -}}
+{{- $slug := regexReplaceAll "[^a-z0-9]+" (lower $title) "-" | trimAll "-" -}}
+{{- $slug = default "item" $slug | trunc 23 | trimSuffix "-" -}}
+{{- $hash := sha256sum (printf "%s/%s" $fullname $title) | trunc 8 -}}
+{{- printf "%s-alert-%s-%s" ($fullname | trunc 20 | trimSuffix "-") $slug $hash -}}
+{{- end -}}
+
+{{/*
+Validate inline dashboard JSON before Helm creates resources or starts the Job.
+External ConfigMap content is checked by the Job because Helm cannot read it.
+*/}}
+{{- define "parseable.validateInlineDashboardJson" -}}
+{{- $name := .name -}}
+{{- if not (kindIs "string" .json) -}}
+  {{- fail (printf "dashboard %q: json must be a JSON string." $name) -}}
+{{- end -}}
+{{- if not (trim .json) -}}
+  {{- fail (printf "dashboard %q: json cannot be empty." $name) -}}
+{{- end -}}
+{{- if gt (len .json) 900000 -}}
+  {{- fail (printf "dashboard %q: inline JSON exceeds 900 KB. Use a separate ConfigMap for this dashboard." $name) -}}
+{{- end -}}
+{{- $dashboard := fromJson .json -}}
+{{- if or (not (kindIs "map" $dashboard)) (and (hasKey $dashboard "Error") (eq (len $dashboard) 1)) -}}
+  {{- fail (printf "dashboard %q: invalid JSON. Check the dashboard JSON and try again." $name) -}}
+{{- end -}}
+{{- if not (kindIs "slice" (get $dashboard "tiles")) -}}
+  {{- fail (printf "dashboard %q: json must include tiles as a list." $name) -}}
+{{- end -}}
+{{- range $index, $tile := get $dashboard "tiles" -}}
+  {{- if not (kindIs "map" $tile) -}}
+    {{- fail (printf "dashboard %q: tiles[%d] must be a JSON object." $name $index) -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{/*
 Chart name and version, for the helm.sh/chart label.
 */}}

@@ -213,62 +213,90 @@ For existing deployments, keep the legacy settings during an image-only upgrade.
 For a newer image, remove `signature` to apply a combined JSON through the API
 Job, or remove the entire `license` block to use the built-in default.
 
-## Dashboards from GitHub
+## Dashboards from values or ConfigMaps
 
-Commit exported dashboard JSON files under one directory in a GitHub repository,
-for example `dashboards/payments.json`. The filename (`payments`) becomes the
-dashboard title. The chart reads only that directory and its subdirectories;
-users do not need to clone the chart or create dashboard ConfigMaps.
-
-Store a GitHub token with **Contents: read** access in a Secret in the
-Parseable namespace, even for public repositories. Reference the Secret in
-values; do not put the token itself in values.
+Set `parseable.dashboards.enabled: true` and list dashboards under `items`.
+Use `json` for a complete exported dashboard or `configMap` for the exact name
+of a ConfigMap that already contains one dashboard JSON entry. The JSON key
+inside that ConfigMap can have any name.
 
 ```yaml
 parseable:
   dashboards:
     enabled: true
-    git:
-      repository: https://github.com/company/observability-config.git
-      ref: main
-      path: dashboards
-      secretKeyRef:
-        name: dashboard-git-access
-        key: token
+    items:
+      - name: payments
+        json: |
+          {"tiles": []}
+      - name: orders
+        configMap: orders-dashboard
+        namespace: parseable
+      - name: operations
+        configMap: operations-dashboard
+        namespace: monitoring
 ```
 
-The Job reads one commit snapshot on each Helm install or upgrade, validates
-every JSON file, then creates or updates dashboards by title. Dashboards absent
-from the Git directory are deleted, including dashboards created through the UI.
-A missing folder or a folder without `.json` files fails without deleting
-anything. Pushing to Git alone does not run the Job.
+`name` becomes the dashboard title. Each dashboard entry must provide exactly one of
+`json` or `configMap`. Each `configMap` item needs `namespace`, including
+ConfigMaps in the release namespace. The chart creates a ConfigMap for each
+inline dashboard and grants the Job read access to referenced ConfigMaps.
+Your Helm installer needs permission to create a Role and RoleBinding in each
+referenced namespace.
 
-## Alerts from GitHub
+The Job validates every dashboard before changing Parseable. The list is the
+complete desired set: dashboards missing from it are deleted, including
+dashboards created in the UI. Set `items: []` to delete all dashboards.
+Omit `dashboards` or set `enabled: false` to leave them unchanged. Run
+`helm upgrade` to apply changes to values or referenced ConfigMaps.
 
-Commit exported alert JSON files to a GitHub folder. Each JSON file's `title`
-sets the alert title; its filename can be anything ending in `.json`. Keep
-notification target IDs in the JSON `targets` list. Configure those targets
-with `parseable.targets` in values before applying alerts that use them.
+## Alerts from values or ConfigMaps
+
+Set `parseable.alerts.enabled: true` and list alerts under `items`. Use `json`
+for complete exported alert JSON or `configMap` for the exact name of an
+existing ConfigMap with one JSON entry in `data`. The key can have any name.
+For either source, optional `name` overrides the JSON `title`; otherwise
+the JSON `title` is used. Keep target ULIDs in the `targets` list; configure
+targets with `parseable.targets` or create them in Parseable first.
 
 ```yaml
 parseable:
   alerts:
     enabled: true
-    git:
-      repository: https://github.com/company/observability-config.git
-      ref: main
-      path: alerts
-      secretKeyRef:
-        name: observability-git-access
-        key: token
+    items:
+      - name: Payment failures # Optional title override
+        json: |
+          {
+            "severity": "high",
+            "title": "Payment errors",
+            "query": "SELECT COUNT(*) AS count FROM payment_logs HAVING count > 0",
+            "queryType": "builder",
+            "datasets": ["payment_logs"],
+            "alertType": "threshold",
+            "thresholdConfig": {"operator": ">", "value": 0},
+            "evalConfig": {"rollingWindow": {"evalStart": "1 day", "evalEnd": "now", "evalFrequency": 10}},
+            "targets": ["01H7Z0XQ9G6K3JY1F5Z2X8V4E3"],
+            "notificationConfig": {"interval": 1}
+          }
+      - name: Order failures # Optional title override
+        configMap: orders-alert
+        namespace: parseable
+      - configMap: operations-alert
+        namespace: monitoring
 ```
 
-The token Secret needs GitHub **Contents: read** access, including for public
-repositories. The Job reads a single commit snapshot, validates every JSON
-file, then creates or updates alerts using the JSON title and optional ID.
-Alerts absent from Git are deleted, including UI-created alerts. A missing
-folder or one without `.json` files fails without deleting alerts. A Git push
-alone does not run the Job; run `helm upgrade` to apply changes.
+Each alert entry must have exactly one of `json` or `configMap`. The chart creates a
+ConfigMap for inline JSON. Each `configMap` item needs `namespace`, including
+ConfigMaps in the Helm release namespace. The Job gets read-only access to the
+referenced ConfigMaps; the Helm installer needs permission to create a Role and
+RoleBinding in each referenced namespace.
+
+Targets are reconciled before alerts. The Job validates all alert JSON and
+target references before making API changes. An alert without `id` is matched
+by its unique title; include its existing ID to rename it. The alert list is
+the complete desired set: alerts absent from it are deleted, including
+UI-created alerts. Set `items: []` to delete all alerts. Omit `alerts`
+or set `enabled: false` to leave them unchanged. Run `helm upgrade` to apply
+changes to values or referenced ConfigMaps.
 
 ## Upgrade / Uninstall
 

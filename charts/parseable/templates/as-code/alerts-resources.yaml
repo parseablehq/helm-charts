@@ -1,0 +1,69 @@
+{{- $p := .Values.parseable }}
+{{- include "parseable.validateAsCodeSection" (dict "values" $p "section" "alerts") }}
+{{- if and (hasKey $p "alerts") (kindIs "map" $p.alerts) $p.alerts.enabled }}
+{{- $fullname := include "parseable.fullname" . }}
+{{- $byNamespace := dict }}
+{{- $seenInline := dict }}
+{{- range $index, $item := $p.alerts.items }}
+  {{- if hasKey $item "json" }}
+    {{- $cm := include "parseable.inlineAlertConfigMapName" (dict "root" $ "item" $item "index" $index) }}
+    {{- if hasKey $seenInline $cm }}{{- fail (printf "alerts[%d]: duplicate inline alert name; each alert needs a unique name or JSON title." $index) }}{{- end }}
+    {{- $_ := set $seenInline $cm true }}
+    {{- $_ := set $byNamespace $.Release.Namespace (append (default (list) (index $byNamespace $.Release.Namespace)) $cm) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $cm }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" $ | nindent 4 }}
+data:
+  alert.json: |-
+    {{- $item.json | nindent 4 }}
+  {{- else if hasKey $item "configMap" }}
+    {{- if not (trim (default "" $item.namespace)) }}{{- fail (printf "alerts[%d]: namespace is required with configMap." $index) }}{{- end }}
+    {{- $ns := trim $item.namespace }}
+    {{- $_ := set $byNamespace $ns (append (default (list) (index $byNamespace $ns)) (trim $item.configMap)) }}
+  {{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-alert-reader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "parseable.labels" . | nindent 4 }}
+{{- range $namespace, $names := $byNamespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullname }}-alert-reader
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "parseable.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: {{ uniq $names | toJson }}
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullname }}-alert-reader
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "parseable.labels" $ | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-alert-reader
+    namespace: {{ $.Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ $fullname }}-alert-reader
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}

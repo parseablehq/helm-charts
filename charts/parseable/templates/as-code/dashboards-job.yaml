@@ -1,42 +1,8 @@
 {{- $p := .Values.parseable }}
-{{- if hasKey $p "dashboards" }}
-  {{- range $field := keys $p.dashboards }}
-    {{- if not (has $field (list "enabled" "git")) }}
-      {{- fail (printf "Unknown parseable.dashboards field %q. Use enabled and git" $field) }}
-    {{- end }}
-  {{- end }}
-  {{- if not (hasKey $p.dashboards "enabled") }}
-    {{- fail "parseable.dashboards.enabled is required; check its spelling in values" }}
-  {{- end }}
-{{- end }}
-{{- if and $p.dashboards $p.dashboards.enabled }}
-{{- if not $p.dashboards.git }}
-  {{- fail "dashboards.git is required when dashboards.enabled is true" }}
-{{- end }}
-{{- $git := $p.dashboards.git }}
-{{- range $field := keys $git }}
-  {{- if not (has $field (list "repository" "ref" "path" "secretKeyRef")) }}
-    {{- fail (printf "Unknown dashboards.git field %q. Use repository, ref, path, or secretKeyRef" $field) }}
-  {{- end }}
-{{- end }}
-{{- range $field := list "repository" "ref" "path" }}
-  {{- if not (index $git $field) }}
-    {{- fail (printf "dashboards.git.%s is required; check its spelling in values" $field) }}
-  {{- end }}
-{{- end }}
-{{- if not $git.secretKeyRef }}
-  {{- fail "dashboards.git.secretKeyRef is required; check its spelling in values" }}
-{{- end }}
-{{- range $field := keys $git.secretKeyRef }}
-  {{- if not (has $field (list "name" "key")) }}
-    {{- fail (printf "Unknown dashboards.git.secretKeyRef field %q. Use name and key" $field) }}
-  {{- end }}
-{{- end }}
-{{- range $field := list "name" "key" }}
-  {{- if not (index $git.secretKeyRef $field) }}
-    {{- fail (printf "dashboards.git.secretKeyRef.%s is required; check its spelling in values" $field) }}
-  {{- end }}
-{{- end }}
+{{- include "parseable.validateAsCodeSection" (dict "values" $p "section" "dashboards") }}
+{{- if and (hasKey $p "dashboards") (kindIs "map" $p.dashboards) $p.dashboards.enabled }}
+{{- if not (hasKey $p.dashboards "items") }}{{- fail "parseable.dashboards.items is required when enabled is true." }}{{- end }}
+{{- $dashboards := $p.dashboards.items }}
 {{- $fullname := include "parseable.fullname" . }}
 {{- $target := printf "%s-querier-service" $fullname }}
 {{- if eq $p.deploymentMode "standalone" }}
@@ -44,10 +10,53 @@
 {{- else if $p.enterprise.enabled }}
   {{- $target = printf "%s-prism-service" $fullname }}
 {{- end }}
+{{- $seen := dict }}
+{{- $inlineNames := dict }}
+{{- $externalNames := dict }}
+{{- $items := list }}
+{{- $byNamespace := dict }}
+{{- range $index, $item := $dashboards }}
+  {{- range $field := keys $item }}
+    {{- if not (has $field (list "name" "json" "configMap" "namespace")) }}
+      {{- fail (printf "Unknown dashboards[%d] field %q. Use name with either json or configMap; namespace is optional for configMap." $index $field) }}
+    {{- end }}
+  {{- end }}
+  {{- $name := trim (default "" $item.name) }}
+  {{- if not $name }}{{- fail (printf "dashboards[%d].name is required and cannot be blank." $index) }}{{- end }}
+  {{- if hasKey $seen $name }}{{- fail (printf "Duplicate dashboard name %q in dashboards. Each dashboard needs a unique name." $name) }}{{- end }}
+  {{- $_ := set $seen $name true }}
+  {{- if eq (hasKey $item "json") (hasKey $item "configMap") }}
+    {{- fail (printf "dashboard %q: set exactly one of json or configMap." $name) }}
+  {{- end }}
+  {{- if hasKey $item "json" }}
+    {{- if hasKey $item "namespace" }}{{- fail (printf "dashboard %q: namespace is only valid with configMap." $name) }}{{- end }}
+    {{- if not (trim $item.json) }}{{- fail (printf "dashboard %q: json cannot be empty." $name) }}{{- end }}
+    {{- if gt (len $item.json) 900000 }}{{- fail (printf "dashboard %q: inline JSON exceeds 900 KB. Use a separate ConfigMap for this dashboard." $name) }}{{- end }}
+    {{- $cm := include "parseable.inlineDashboardConfigMapName" (dict "root" $ "name" $item.name "index" $index) }}
+    {{- $_ := set $inlineNames (printf "%s/%s" $.Release.Namespace $cm) true }}
+    {{- $items = append $items (dict "name" $name "configMap" $cm "namespace" $.Release.Namespace) }}
+    {{- $_ := set $byNamespace $.Release.Namespace (append (default (list) (index $byNamespace $.Release.Namespace)) $cm) }}
+  {{- else }}
+    {{- $cm := trim (default "" $item.configMap) }}
+    {{- $ns := trim (default "" $item.namespace) }}
+    {{- if not $ns }}{{- fail (printf "dashboard %q: namespace is required with configMap." $name) }}{{- end }}
+    {{- if or (gt (len $cm) 253) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" $cm)) }}{{- fail (printf "dashboard %q: configMap must be a valid Kubernetes ConfigMap name." $name) }}{{- end }}
+    {{- range $part := splitList "." $cm }}
+      {{- if gt (len $part) 63 }}{{- fail (printf "dashboard %q: each part of configMap name must be at most 63 characters." $name) }}{{- end }}
+    {{- end }}
+    {{- if or (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $ns)) (gt (len $ns) 63) }}{{- fail (printf "dashboard %q: namespace must be a valid Kubernetes namespace name." $name) }}{{- end }}
+    {{- $_ := set $externalNames (printf "%s/%s" $ns $cm) true }}
+    {{- $items = append $items (dict "name" $name "configMap" $cm "namespace" $ns) }}
+    {{- $_ := set $byNamespace $ns (append (default (list) (index $byNamespace $ns)) $cm) }}
+  {{- end }}
+{{- end }}
+{{- range $name := keys $externalNames }}
+  {{- if hasKey $inlineNames $name }}{{- fail (printf "ConfigMap %s is generated for an inline dashboard; choose a different external ConfigMap name." $name) }}{{- end }}
+{{- end }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ $fullname }}-dashboards
+  name: {{ printf "%s-dashboards" (trunc 52 $fullname | trimSuffix "-") }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "parseable.labels" . | nindent 4 }}
@@ -65,7 +74,7 @@ spec:
         {{- include "parseable.labels" . | nindent 8 }}
     spec:
       restartPolicy: Never
-      automountServiceAccountToken: false
+      serviceAccountName: {{ $fullname }}-dashboard-reader
       securityContext:
         {{- toYaml $p.podSecurityContext | nindent 8 }}
       containers:
@@ -75,19 +84,16 @@ spec:
           command: ["python", "-c"]
           args:
             - |-
-              """Reconcile Parseable dashboards from a GitHub directory."""
+              """Reconcile Parseable dashboards from configured ConfigMaps."""
 
               import base64
-              import binascii
               import json
               import os
-              import re
               import secrets
               import sys
               import time
-              from concurrent.futures import ThreadPoolExecutor
               from urllib.error import HTTPError, URLError
-              from urllib.parse import quote, urlencode, urlparse
+              from urllib.parse import quote
               from urllib.request import Request, urlopen
 
 
@@ -97,10 +103,8 @@ spec:
               ).decode()
               API_PATH = "/api/v1/dashboards"
               ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-              GITHUB_HEADERS = {
-                  "Accept": "application/vnd.github+json",
-                  "User-Agent": "parseable-helm-dashboards",
-              }
+              TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+              CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 
 
               def new_ulid():
@@ -130,7 +134,7 @@ spec:
                               raise ValueError(
                                   f"dashboard {title!r} cannot be updated by this account; "
                                   "it may belong to another user. Update it as its owner or "
-                                  "remove it before applying Git dashboards"
+                                  "remove it before running Helm again"
                               ) from error
                       raise ValueError(f"Parseable {method} {endpoint} returned HTTP {error.code}") from error
                   return json.loads(content) if method == "GET" and content else None
@@ -146,140 +150,59 @@ spec:
                   return value
 
 
-              def github_request(endpoint, token):
-                  headers = dict(GITHUB_HEADERS)
-                  headers["Authorization"] = f"Bearer {token}"
-                  url = "https://api.github.com" + endpoint
-                  for attempt in range(3):
-                      try:
-                          with urlopen(Request(url, headers=headers), timeout=30) as response:
-                              return json.load(response)
-                      except HTTPError as error:
-                          if error.code in (429, 500, 502, 503, 504) and attempt < 2:
-                              time.sleep(2 ** attempt)
-                              continue
-                          if error.code == 404:
-                              raise ValueError(
-                                  "GitHub repository, ref, or dashboard folder was not found; "
-                                  "for private repositories check token access"
-                              ) from error
-                          if error.code in (401, 403):
-                              raise ValueError(
-                                  f"GitHub returned HTTP {error.code}; check the token's Contents read permission "
-                                  "and API rate limit"
-                              ) from error
-                          raise ValueError(f"GitHub API returned HTTP {error.code} while reading dashboards") from error
-                      except URLError as error:
-                          if attempt < 2:
-                              time.sleep(2 ** attempt)
-                              continue
-                          raise ValueError("cannot reach GitHub to read dashboards") from error
+              def read_configmap(namespace, name, token, context):
+                  url = (
+                      "https://kubernetes.default.svc/api/v1/namespaces/"
+                      f"{quote(namespace, safe='')}/configmaps/{quote(name, safe='')}"
+                  )
+                  request = Request(url, headers={"Authorization": f"Bearer {token}"})
+                  try:
+                      with urlopen(request, timeout=15, context=context) as response:
+                          configmap = json.load(response)
+                  except json.JSONDecodeError as error:
+                      raise ValueError(f"Kubernetes returned invalid ConfigMap data for {namespace}/{name}") from error
+                  except HTTPError as error:
+                      if error.code == 404:
+                          raise ValueError(f"ConfigMap {namespace}/{name} was not found; create it before running Helm") from error
+                      if error.code == 403:
+                          raise ValueError(f"cannot read ConfigMap {namespace}/{name}; grant the dashboard Job get permission in that namespace") from error
+                      raise ValueError(f"reading ConfigMap {namespace}/{name} returned HTTP {error.code}") from error
+                  except (URLError, TimeoutError) as error:
+                      raise ValueError(f"cannot reach Kubernetes API while reading ConfigMap {namespace}/{name}") from error
+                  if not isinstance(configmap, dict):
+                      raise ValueError(f"Kubernetes returned invalid ConfigMap {namespace}/{name}")
+                  data = configmap.get("data") or {}
+                  if not isinstance(data, dict) or len(data) != 1 or configmap.get("binaryData"):
+                      raise ValueError(f"ConfigMap {namespace}/{name} must have exactly one text entry in data and no binaryData")
+                  key, content = next(iter(data.items()))
+                  if not isinstance(content, str) or not content.strip():
+                      raise ValueError(f"ConfigMap {namespace}/{name} key {key!r} is empty")
+                  return content
 
 
-              def github_repo_path(repository):
-                  parsed = urlparse(repository)
-                  parts = parsed.path.strip("/").removesuffix(".git").split("/")
-                  if (
-                      parsed.scheme != "https"
-                      or parsed.netloc != "github.com"
-                      or parsed.username
-                      or parsed.password
-                      or parsed.query
-                      or parsed.fragment
-                      or len(parts) != 2
-                      or not all(parts)
-                  ):
-                      raise ValueError("dashboards.git.repository must be https://github.com/OWNER/REPO")
-                  return "/repos/" + "/".join(quote(part, safe="") for part in parts)
+              def discover_configmaps():
+                  import ssl
 
-
-              def discover_github():
-                  repo = github_repo_path(os.environ["DASHBOARD_GIT_REPOSITORY"])
-                  ref = os.environ["DASHBOARD_GIT_REF"]
-                  folder = os.environ["DASHBOARD_GIT_PATH"].strip("/")
-                  token = os.environ.get("DASHBOARD_GIT_TOKEN", "").strip()
-                  if not token:
-                      raise ValueError(
-                          f"dashboard GitHub token Secret {os.environ['DASHBOARD_GIT_SECRET_NAME']!r} "
-                          f"is missing key {os.environ['DASHBOARD_GIT_SECRET_KEY']!r} or its value is empty"
-                      )
-                  if not folder or any(part in (".", "..") for part in folder.split("/")):
-                      raise ValueError("dashboards.git.path must be a folder inside the repository")
-
-                  # Pin every request to one commit, even if the branch moves during the Job.
-                  commit = github_request(f"{repo}/commits/{quote(ref, safe='')}", token)
-                  sha = commit.get("sha") if isinstance(commit, dict) else None
-                  if not isinstance(sha, str) or len(sha) != 40:
-                      raise ValueError("GitHub did not return a valid commit for dashboards.git.ref")
-                  print(f"Reading dashboards from GitHub commit {sha[:12]}", flush=True)
-
-                  paths = []
-                  pending = [folder]
-                  directories_seen = 0
-                  while pending:
-                      directories_seen += 1
-                      if directories_seen > 100:
-                          raise ValueError("dashboard folder contains too many directories")
-                      directory = pending.pop()
-                      endpoint = f"{repo}/contents/{quote(directory, safe='/')}?{urlencode({'ref': sha})}"
-                      entries = github_request(endpoint, token)
-                      if not isinstance(entries, list):
-                          raise ValueError(f"GitHub path {directory!r} is not a directory")
-                      if len(entries) >= 1000:
-                          raise ValueError(f"GitHub directory {directory!r} has too many entries to list safely")
-                      for entry in entries:
-                          entry_type, entry_path = entry.get("type"), entry.get("path")
-                          if not isinstance(entry_path, str):
-                              raise ValueError("GitHub returned an invalid dashboard path")
-                          if entry_type == "dir":
-                              pending.append(entry_path)
-                          elif entry_type == "file" and entry_path.lower().endswith(".json"):
-                              blob_sha = entry.get("sha")
-                              if not isinstance(blob_sha, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", blob_sha):
-                                  raise ValueError(f"GitHub returned an invalid file ID for {entry_path!r}")
-                              paths.append((entry_path, blob_sha))
-                          elif entry_type not in ("file", "dir"):
-                              raise ValueError(f"unsupported GitHub entry in dashboard folder: {entry_path}")
-                          if len(paths) > 1000 or len(pending) > 100:
-                              raise ValueError("dashboard folder contains too many files or directories")
-
-                  if not paths:
-                      raise ValueError("dashboard folder has no .json files; no dashboards were changed")
-
-                  titles_by_path = {}
-                  titles_seen = set()
-                  for file_path, blob_sha in sorted(paths):
-                      title = os.path.basename(file_path)[:-5]
-                      if not title.strip():
-                          raise ValueError(f"dashboard filename {file_path!r} has no title")
-                      if title in titles_seen:
-                          raise ValueError(f"duplicate dashboard title {title!r} in GitHub folder")
-                      titles_seen.add(title)
-                      titles_by_path[file_path] = (title, blob_sha)
-
-                  def read_blob(item):
-                      file_path, (title, blob_sha) = item
-                      endpoint = f"{repo}/git/blobs/{blob_sha}"
-                      file = github_request(endpoint, token)
-                      if (
-                          not isinstance(file, dict)
-                          or file.get("encoding") != "base64"
-                          or not isinstance(file.get("sha"), str)
-                          or file["sha"].lower() != blob_sha.lower()
-                      ):
-                          raise ValueError(f"cannot read dashboard JSON {file_path!r} from GitHub")
-                      if not isinstance(file.get("content"), str):
-                          raise ValueError(f"GitHub returned no content for dashboard {file_path!r}")
-                      try:
-                          encoded = "".join(file["content"].split())
-                          content = base64.b64decode(encoded, validate=True)
-                      except (KeyError, TypeError, binascii.Error) as error:
-                          raise ValueError(f"GitHub returned invalid content for {file_path!r}") from error
-                      return title, read_json(content, f"GitHub file {file_path!r}")
-
-                  # Read files in parallel, but finish and validate every file before any API write.
-                  with ThreadPoolExecutor(max_workers=4) as pool:
-                      return dict(pool.map(read_blob, titles_by_path.items()))
+                  items = json.loads(os.environ["DASHBOARD_ITEMS"])
+                  if not isinstance(items, list):
+                      raise ValueError("dashboards must be a list")
+                  if not items:
+                      return {}
+                  seen = set()
+                  for item in items:
+                      name = item["name"]
+                      if name in seen:
+                          raise ValueError(f"duplicate dashboard name {name!r} in dashboards")
+                      seen.add(name)
+                  with open(TOKEN_PATH, encoding="utf-8") as stream:
+                      token = stream.read().strip()
+                  context = ssl.create_default_context(cafile=CA_PATH)
+                  configured = {}
+                  for item in items:
+                      name, namespace, cm = item["name"], item["namespace"], item["configMap"]
+                      content = read_configmap(namespace, cm, token, context)
+                      configured[name] = read_json(content, f"dashboard {name!r} from ConfigMap {namespace}/{cm}")
+                  return configured
 
 
               def dashboard_payload(title, imported):
@@ -376,7 +299,7 @@ spec:
 
 
               def main():
-                  configured = discover_github()
+                  configured = discover_configmaps()
                   wait_for_api()
                   reconcile(configured)
 
@@ -388,22 +311,8 @@ spec:
                       print(f"ERROR: {error}", file=sys.stderr, flush=True)
                       sys.exit(1)
           env:
-            - name: DASHBOARD_GIT_REPOSITORY
-              value: {{ $p.dashboards.git.repository | quote }}
-            - name: DASHBOARD_GIT_REF
-              value: {{ $p.dashboards.git.ref | quote }}
-            - name: DASHBOARD_GIT_PATH
-              value: {{ $p.dashboards.git.path | quote }}
-            - name: DASHBOARD_GIT_SECRET_NAME
-              value: {{ $p.dashboards.git.secretKeyRef.name | quote }}
-            - name: DASHBOARD_GIT_SECRET_KEY
-              value: {{ $p.dashboards.git.secretKeyRef.key | quote }}
-            - name: DASHBOARD_GIT_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $p.dashboards.git.secretKeyRef.name | quote }}
-                  key: {{ $p.dashboards.git.secretKeyRef.key | quote }}
-                  optional: true
+            - name: DASHBOARD_ITEMS
+              value: {{ toJson $items | quote }}
             - name: PARSEABLE_BASE_URL
               value: {{ printf "http://%s.%s" $target .Release.Namespace | quote }}
             - name: P_USERNAME

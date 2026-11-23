@@ -452,11 +452,10 @@ parseable:
   ## -----------------------------------------------------------------------
   ## Parseable resources as code
   ## -----------------------------------------------------------------------
-  ## These resources are reconciled on Helm install and upgrade.
-  ## Omit a section to leave that resource type unchanged.
-  ## When a section is enabled/present, its list or Git folder is the complete
-  ## source of truth. Missing resources are deleted, including UI-created ones.
-  ## A Git push alone does not apply changes; run helm upgrade.
+  ## Set enabled: true and list resources under items to reconcile on install
+  ## and upgrade. Omit a section or set enabled: false to leave it unchanged.
+  ## The items list is the complete desired set; items: [] deletes all resources
+  ## of that type, including ones created through the UI.
 
   ## DATASETS
   ## Required: name, telemetryType, logSource.
@@ -470,18 +469,20 @@ parseable:
   ## Telemetry type and log source are set at creation. Enterprise updates tags;
   ## OSS applies tags at creation. Keep the name stable: changing it creates a
   ## new dataset and deletes the old one, including its data.
-  ## With datasets present, datasets absent from the list are deleted.
-  ## Omit datasets to keep all existing datasets; datasets: [] deletes all.
+  ## With enabled: true, datasets absent from items are deleted.
+  ## Set items: [] to delete all datasets; enabled: false leaves them unchanged.
   ##
   # datasets:
-  #   - name: payment-traces
-  #     telemetryType: traces
-  #     logSource: otel-traces
-  #     tags: [agent-observability]  # Optional
-  #     retention:                  # Optional
-  #       durationDays: 30d
-  #     smartCache:                 # Optional; Enterprise only
-  #       size: 10Gi
+  #   enabled: true
+  #   items:
+  #     - name: payment-traces
+  #       telemetryType: traces
+  #       logSource: otel-traces
+  #       tags: [agent-observability]  # Optional
+  #       retention:                  # Optional
+  #         durationDays: 30d
+  #       smartCache:                 # Optional; Enterprise only
+  #         size: 10Gi
 
   ## API KEYS
   ## Required: name, apiKeyType (ingestor | query).
@@ -493,39 +494,47 @@ parseable:
   ## Keep key values out of values.yaml. A key can be matched for a name change
   ## by its value, or for a value change by its name. Changing apiKeyType
   ## requires revoking and recreating the key.
-  ## With apiKeys present, keys absent from the list are revoked.
-  ## Omit apiKeys to keep all existing keys; apiKeys: [] revokes all.
+  ## With enabled: true, keys absent from items are revoked.
+  ## Set items: [] to revoke all keys; enabled: false leaves them unchanged.
   ##
   # apiKeys:
-  #   - name: payment-ingest
-  #     apiKeyType: ingestor
-  #     secretKeyRef:                # Optional; omit to generate a key on terminal
-  #       name: parseable-api-keys
-  #       key: PAYMENT_KEY
-  #   - name: payment-query
-  #     apiKeyType: query
+  #   enabled: true
+  #   items:
+  #     - name: payment-ingest
+  #       apiKeyType: ingestor
+  #       secretKeyRef:                # Optional; omit to generate a key on terminal
+  #         name: parseable-api-keys
+  #         key: PAYMENT_KEY
+  #     - name: payment-query
+  #       apiKeyType: query
 
   ## DASHBOARDS
-  ## Required when enabled: git.repository, git.ref, git.path,
-  ## git.secretKeyRef.name, git.secretKeyRef.key.
-  ## Store a GitHub token with Contents: read access in a Kubernetes Secret,
-  ## including for public repositories. Never put the token in values.yaml.
-  ## path is relative to the repository root, it list all dashboard file from there; subfolders are included.
-  ## The .json filename becomes the dashboard title: dashboards/payments.json
-  ## creates the dashboard "payments".
-  ## Git is the source of truth: dashboards absent from the folder are deleted.
-  ## A missing folder, no .json files, or invalid JSON fails without deletion.
-  ## Omit dashboards or set enabled: false to leave dashboards unchanged.
+  ## Set enabled: true and list dashboards under items. Each entry needs a
+  ## unique name (the title shown in Parseable) and exactly one source:
+  ## json: complete exported dashboard JSON pasted into values, or
+  ## configMap: exact name of an existing ConfigMap with one JSON entry in data.
+  ## The data key can have any name. The chart creates a ConfigMap for each
+  ## inline JSON item. Every configMap item needs namespace, including
+  ## ConfigMaps in the Helm release namespace.
+  ## The Job validates every entry before changing Parseable. Dashboards absent
+  ## from items are deleted, including UI-created ones. Set items: [] to
+  ## delete all dashboards; enabled: false leaves them unchanged.
+  ## Run helm upgrade after changing values or an external ConfigMap.
+  ## The Helm installer must be allowed to create a read-only Role and
+  ## RoleBinding in each referenced namespace.
   ##
   # dashboards:
   #   enabled: true
-  #   git:
-  #     repository: https://github.com/company/observability-config.git
-  #     ref: main
-  #     path: dashboards
-  #     secretKeyRef:
-  #       name: observability-git-access
-  #       key: token
+  #   items:
+  #     - name: payments
+  #       json: |
+  #         {"tiles": []}
+  #     - name: orders
+  #       configMap: orders-dashboard
+  #       namespace: parseable
+  #     - name: operations
+  #       configMap: operations-dashboard
+  #       namespace: monitoring
 
   ## ALERT TARGETS
   ## Required: id (26-character ULID), title, type, endpointSecretRef.
@@ -538,56 +547,64 @@ parseable:
   ## Targets are applied before alerts. Keep id and title stable. A title
   ## cannot change in place; changing an ID under the same title requires that
   ## no alert uses the old ID.
-  ## With targets present, targets absent from the list are deleted after alerts.
-  ## Omit targets to keep all existing targets; targets: [] requests deletion
-  ## of all targets (the server can reject deletion of targets in use).
+  ## With enabled: true, targets absent from items are deleted after alerts.
+  ## Set items: [] to request deletion of all targets; enabled: false leaves
+  ## them unchanged. The server may reject deletion of targets in use.
   ##
   # targets:
-  #   - id: 01K9QQ9QC51KD43TE4HTJ4MW1D
-  #     title: payments-webhook
-  #     type: webhook
-  #     endpointSecretRef:
-  #       name: alert-target-secrets
-  #       key: PAYMENTS_URL
-  #     skipTlsCheck: false          # Optional
-  #     customHeaders:              # Optional; webhook only
-  #       X-Team: payments
-  #   - id: 01K9QQ9QC51KD43TE4HTJ4MW1E
-  #     title: ops-alertmanager
-  #     type: alertManager
-  #     endpointSecretRef:
-  #       name: alert-target-secrets
-  #       key: ALERTMANAGER_URL
-  #     usernameSecretRef:          # Optional with passwordSecretRef
-  #       name: alert-target-secrets
-  #       key: ALERTMANAGER_USERNAME
-  #     passwordSecretRef:
-  #       name: alert-target-secrets
-  #       key: ALERTMANAGER_PASSWORD
+  #   enabled: true
+  #   items:
+  #     - id: 01K9QQ9QC51KD43TE4HTJ4MW1D
+  #       title: payments-webhook
+  #       type: webhook
+  #       endpointSecretRef:
+  #         name: alert-target-secrets
+  #         key: PAYMENTS_URL
+  #       skipTlsCheck: false          # Optional
+  #       customHeaders:              # Optional; webhook only
+  #         X-Team: payments
+  #     - id: 01K9QQ9QC51KD43TE4HTJ4MW1E
+  #       title: ops-alertmanager
+  #       type: alertManager
+  #       endpointSecretRef:
+  #         name: alert-target-secrets
+  #         key: ALERTMANAGER_URL
+  #       usernameSecretRef:          # Optional with passwordSecretRef
+  #         name: alert-target-secrets
+  #         key: ALERTMANAGER_USERNAME
+  #       passwordSecretRef:
+  #         name: alert-target-secrets
+  #         key: ALERTMANAGER_PASSWORD
 
   ## ALERTS
-  ## Required when enabled: git.repository, git.ref, git.path,
-  ## git.secretKeyRef.name, git.secretKeyRef.key.
-  ## Put exported alert .json files in a GitHub folder. Set git.path to that
-  ## folder's path from the repository root (for example, parseable/alerts).
-  ## git.secretKeyRef points to a Kubernetes Secret containing a GitHub token
-  ## with Contents: read access. To reuse the dashboard token, set the alert
-  ## secretKeyRef.name and key to the same values used by dashboards.git.
-  ## The token must be able to read both GitHub folders.
-  ## Each JSON needs a nonempty targets list of target ULIDs.
-  ## Git is the source of truth: alerts absent from the folder are deleted.
-  ## A missing folder, no .json files, or invalid JSON fails before changes.
-  ## Omit alerts or set enabled: false to leave alerts unchanged.
+  ## Set enabled: true and list alerts under items. Each entry needs exactly
+  ## one source: json (complete exported alert JSON) or configMap (exact name
+  ## of an existing ConfigMap with one JSON entry in data). The data key can
+  ## have any name. Optional item name overrides the JSON title; otherwise
+  ## the JSON title is used. Keep the alert id in JSON when renaming.
+  ## An alert may omit id; the Job then matches an existing alert by unique
+  ## title. Target IDs in the JSON targets list must be valid target ULIDs.
+  ## Targets defined in parseable.targets are applied before alerts.
+  ## Every configMap item needs its namespace, including the Helm release
+  ## namespace. The chart creates a ConfigMap for each inline JSON item.
+  ## The Job validates every entry before changing Parseable. Alerts absent
+  ## from items are deleted, including UI-created ones. Set items: [] to
+  ## delete all alerts; enabled: false leaves them unchanged.
+  ## Run helm upgrade after changing values or an external ConfigMap.
+  ## The Helm installer must be allowed to create a read-only Role and
+  ## RoleBinding in each referenced namespace.
   ##
   # alerts:
   #   enabled: true
-  #   git:
-  #     repository: https://github.com/company/observability-config.git
-  #     ref: main
-  #     path: alerts
-  #     secretKeyRef:
-  #       name: observability-git-access
-  #       key: token
+  #   items:
+  #     - name: Payment failures  # Optional: overrides JSON title
+  #       json: |
+  #         {"title": []}
+  #     - name: Order failures   # Optional: overrides JSON title
+  #       configMap: orders-alert
+  #       namespace: parseable
+  #     - configMap: operations-alert
+  #       namespace: monitoring
 
   ## ServiceMonitor for this Parseable deployment. Read more on ServiceMonitor
   ## here: https://prometheus-operator.dev/docs/api-reference/api/#monitoring.coreos.com/v1.ServiceMonitor

@@ -1,5 +1,8 @@
-{{- if hasKey .Values.parseable "datasets" }}
 {{- $p := .Values.parseable }}
+{{- include "parseable.validateAsCodeSection" (dict "values" $p "section" "datasets") }}
+{{- if and (hasKey $p "datasets") (kindIs "map" $p.datasets) $p.datasets.enabled }}
+{{- if not (hasKey $p.datasets "items") }}{{- fail "parseable.datasets.items is required when enabled is true." }}{{- end }}
+{{- $datasets := $p.datasets.items }}
 {{- $fullname := include "parseable.fullname" . }}
 {{- $target := printf "%s-querier-service" $fullname }}
 {{- if eq $p.deploymentMode "standalone" }}
@@ -9,7 +12,7 @@
 {{- end }}
 {{- $url := printf "http://%s.%s" $target .Release.Namespace }}
 {{- $desiredNames := list }}
-{{- range $ds := $p.datasets }}
+{{- range $ds := $datasets }}
 {{- include "parseable.validateDatasetName" $ds.name }}
 {{- if has $ds.name $desiredNames }}
 {{- fail (printf "dataset %q is listed more than once; keep each dataset name only once" $ds.name) }}
@@ -91,7 +94,7 @@ data:
     except RuntimeError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         sys.exit(1)
-  {{- if gt (len $p.datasets) 0 }}
+  {{- if gt (len $datasets) 0 }}
   create-datasets.sh: |-
     #!/bin/sh
     set -u
@@ -149,7 +152,7 @@ data:
       fi
     }
 
-    {{- range $ds := $p.datasets }}
+    {{- range $ds := $datasets }}
     dataset_actions=""
     dataset_ready=0
     dataset_existed=0
@@ -255,7 +258,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded,hook-failed
 spec:
   backoffLimit: 0
-  activeDeadlineSeconds: {{ if eq (len $p.datasets) 0 }}540{{ else }}360{{ end }}
+  activeDeadlineSeconds: {{ if eq (len $datasets) 0 }}540{{ else }}360{{ end }}
   template:
     metadata:
       labels:
@@ -272,7 +275,7 @@ spec:
             defaultMode: 0755
       containers:
         - name: create-datasets
-          {{- if eq (len $p.datasets) 0 }}
+          {{- if eq (len $datasets) 0 }}
           image: docker.io/library/python:3.12-alpine
           imagePullPolicy: IfNotPresent
           command: ["python", "/scripts/reconcile-datasets.py"]
@@ -290,7 +293,7 @@ spec:
               mountPath: /scripts
 {{- end }}
 
-{{- if and (hasKey .Values.parseable "datasets") (gt (len .Values.parseable.datasets) 0) }}
+{{- if and (hasKey .Values.parseable "datasets") (kindIs "map" .Values.parseable.datasets) .Values.parseable.datasets.enabled (gt (len .Values.parseable.datasets.items) 0) }}
 {{- $p := .Values.parseable }}
 {{- $fullname := include "parseable.fullname" . }}
 ---
