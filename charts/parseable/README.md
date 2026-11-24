@@ -37,7 +37,8 @@ parseable:
   datasets:
     - name: sample-dataset
       retention:
-        durationDays: 30d
+        action: delete
+        duration: 30d
 
 # 3.2.7 and newer
 parseable:
