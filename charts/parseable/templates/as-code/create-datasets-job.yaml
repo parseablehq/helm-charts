@@ -20,7 +20,7 @@
 {{- $desiredNames = append $desiredNames $ds.name }}
 {{- include "parseable.validateDatasetCombination" (dict "dataset" $ds "enterpriseEnabled" $p.enterprise.enabled) }}
 {{- if $ds.retention }}
-{{- include "parseable.validateRetentionDuration" (dict "name" $ds.name "duration" $ds.retention.durationDays) }}
+{{- include "parseable.validateRetentionDuration" (dict "name" $ds.name "duration" $ds.retention.duration) }}
 {{- end }}
 {{- if $ds.smartCache }}
 {{- include "parseable.validateSmartCacheSize" (dict "name" $ds.name "size" $ds.smartCache.size) }}
@@ -217,13 +217,13 @@ data:
       {{- end }}
       {{- end }}
       {{- if $ds.retention }}
-      {{- if or (eq (printf "%v" $ds.retention.durationDays) "0d") (eq (printf "%v" $ds.retention.durationDays) "") }}
+      {{- if or (eq (printf "%v" $ds.retention.duration) "0d") (eq (printf "%v" $ds.retention.duration) "") }}
       run_step "{{ $ds.name }}" "retention" -X PUT -H "Content-Type: application/json" \
         -d '[]' \
         "$base/api/v1/logstream/{{ $ds.name }}/retention" || true
       {{- else }}
       run_step "{{ $ds.name }}" "retention" -X PUT -H "Content-Type: application/json" \
-        -d '[{"description":"created by helm","action":"delete","duration":"{{ $ds.retention.durationDays }}"}]' \
+        -d '[{"description":"created by helm","action":"{{ $ds.retention.action }}","duration":"{{ $ds.retention.duration }}"}]' \
         "$base/api/v1/logstream/{{ $ds.name }}/retention" || true
       {{- end }}
       {{- end }}

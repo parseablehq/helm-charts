@@ -462,9 +462,10 @@ parseable:
   ##   telemetryType: logs | metrics | traces
   ##   logSource: json | otel-logs | otel-metrics | otel-traces
   ## Use matching OpenTelemetry types and sources (logs/otel-logs, etc.).
-  ## Optional: tags, retention.durationDays, smartCache.size.
+  ## Optional: tags, retention, smartCache.size.
   ##   tags: agent-observability (requires an otel-traces dataset).
-  ##   retention.durationDays: 1d-3650d; 0d or "" removes retention.
+  ##   retention.duration: 1d-3650d; 0d or "" removes retention.
+  ##   retention.action: action after duration; only delete is supported.
   ##   smartCache.size: Enterprise only, minimum 10Gi; allow enough hot-tier disk.
   ## Telemetry type and log source are set at creation. Enterprise updates tags;
   ## OSS applies tags at creation. Keep the name stable: changing it creates a
@@ -478,10 +479,11 @@ parseable:
   #     - name: payment-traces
   #       telemetryType: traces
   #       logSource: otel-traces
-  #       tags: [agent-observability]  # Optional
-  #       retention:                  # Optional
-  #         durationDays: 30d
-  #       smartCache:                 # Optional; Enterprise only
+  #       tags: [agent-observability]   # Optional
+  #       retention:                    # Optional
+  #         duration: 30d               # "" removes retention, must be between 1d and 3650d
+  #         action: delete              # Only deletion supported for now
+  #       smartCache:                   # Optional; Enterprise only
   #         size: 10Gi
 
   ## API KEYS
