@@ -22,29 +22,54 @@ overlays/
 
 ## Upgrading to 3.2.7
 
-Chart 3.2.7 contains a breaking change for installations that manage dataset
-retention through `parseable.datasets`:
+Chart 3.2.7 changes `parseable.datasets` from a list into a reconciliation
+object. Existing dataset values must be migrated before upgrading:
 
-- `retention.durationDays` was renamed to `retention.duration`.
-- `retention.action` is now required and its only supported value is `delete`.
-
-Update every configured retention rule before upgrading. Helm schema validation
-rejects the old field and rejects a retention object without `action`.
+- Move the old dataset list under `datasets.items`.
+- Add `datasets.enabled: true` to manage datasets.
+- Add the required `telemetryType` and `logSource` fields to every item.
+- Keep the existing `retention.duration` and `retention.action` fields.
+  `action` currently supports only `delete`.
 
 ```yaml
 # Before 3.2.7
-retention:
-  durationDays: 30d
+parseable:
+  datasets:
+    - name: sample-dataset
+      retention:
+        action: delete
+        duration: 30d
 
 # 3.2.7 and newer
-retention:
-  duration: 30d
-  action: delete
+parseable:
+  datasets:
+    enabled: true
+    items:
+      - name: sample-dataset
+        telemetryType: logs
+        logSource: json
+        retention:
+          action: delete
+          duration: 30d
 ```
 
-The same shape is required when removing a rule: set `duration` to `0d` or an
-empty string and retain `action: delete`. Installations that do not configure
-`parseable.datasets.items[].retention` are unaffected by this values migration.
+This also changes lifecycle behavior. Before 3.2.7, the chart only created or
+updated datasets listed in values. In 3.2.7, `enabled: true` makes `items` the
+complete desired set: user datasets absent from the list are deleted, including
+their data, and `items: []` requests deletion of all user datasets. Review the
+list before upgrading. To preserve the old `datasets: []` behavior and leave
+existing datasets unchanged, omit `datasets` or use:
+
+```yaml
+parseable:
+  datasets:
+    enabled: false
+```
+
+When removing only a retention rule, keep the dataset in `items`, set
+`retention.duration` to `0d` or an empty string, and retain `action: delete`.
+Installations that did not list any datasets are unaffected after removing the
+legacy `datasets: []` value or replacing it with `enabled: false` as above.
 
 ## Standalone (single pod, local-store)
 
