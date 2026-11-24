@@ -1,12 +1,15 @@
 {{- $p := .Values.parseable }}
+{{- include "parseable.validateAsCodeSection" (dict "values" $p "section" "apiKeys") }}
 {{- if hasKey $p "apikeys" }}
   {{- fail "parseable.apikeys is not supported; use parseable.apiKeys (capital K)" }}
 {{- end }}
-{{- if hasKey $p "apiKeys" }}
+{{- if and (hasKey $p "apiKeys") (kindIs "map" $p.apiKeys) $p.apiKeys.enabled }}
+{{- if not (hasKey $p.apiKeys "items") }}{{- fail "parseable.apiKeys.items is required when enabled is true." }}{{- end }}
+{{- $keys := $p.apiKeys.items }}
 {{- $seen := dict }}
 {{- $seenValues := dict }}
 {{- $showGeneratedCredentials := false }}
-{{- range $key := $p.apiKeys }}
+{{- range $key := $keys }}
   {{- if not (hasKey $key "apiKeyType") }}
     {{- fail (printf "apiKeys name=%s: apiKeyType is required; set it to ingestor or query" $key.name) }}
   {{- end }}
@@ -58,7 +61,7 @@ metadata:
     {{- include "parseable.labels" . | nindent 4 }}
 data:
   api-keys.json: |-
-    {{ toJson $p.apiKeys }}
+    {{ toJson $keys }}
   reconcile-api-keys.py: |-
     import base64
     import json
@@ -433,7 +436,7 @@ spec:
                 secretKeyRef:
                   name: {{ $p.store.secretName }}
                   key: password
-            {{- range $index, $key := $p.apiKeys }}
+            {{- range $index, $key := $keys }}
             {{- if hasKey $key "secretKeyRef" }}
             - name: API_KEY_{{ $index }}
               valueFrom:

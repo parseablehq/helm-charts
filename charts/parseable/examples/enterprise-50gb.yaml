@@ -1,0 +1,80 @@
+# yaml-language-server: $schema=../charts/parseable/values.schema.json
+# Enterprise distributed with the built-in 50 GB license (image v3.2.7+).
+# Create parseable-env-secret with addr, username, password, and the S3 credentials.
+# Create parseable-cluster-secret with the cluster-secret key.
+# Replace <storage-class> with the desired StorageClass for the ingestor, querier, and prism PVCs.
+
+parseable:
+  deploymentMode: distributed
+
+  store:
+    type: s3-store
+    secretName: parseable-env-secret
+
+  clusterSecret:
+    enabled: true
+    secretName: parseable-cluster-secret
+    secretKey: cluster-secret
+
+  enterprise:
+    enabled: true
+    image:
+      repository: quay.io/parseablehq/parseable-enterprise
+      tag: "v3.2.7"   # Must be v3.2.7 or later
+      pullPolicy: Always
+     
+  distributed:
+    ingestor:
+      replicas: 1
+      env:
+        RUST_LOG: warn
+      resources:
+        requests:
+          cpu: 1
+          memory: 512Mi
+        limits:
+          cpu: 2
+          memory: 2Gi
+      persistence:
+        staging:
+          enabled: true
+          storageClass: <storage-class>
+          accessMode: ReadWriteOnce
+          size: 5Gi
+
+    querier:
+      replicas: 1
+      env:
+        RUST_LOG: warn
+      resources:
+        requests:
+          cpu: 1
+          memory: 512Mi
+        limits:
+          cpu: 2
+          memory: 2Gi
+      persistence:
+        hotTier:
+          enabled: true
+          storageClass: <storage-class>
+          accessMode: ReadWriteOnce
+          size: 15Gi
+
+    prism:
+      replicas: 1
+      env:
+        RUST_LOG: warn
+      resources:
+        requests:
+          cpu: 1
+          memory: 512Mi
+        limits:
+          cpu: 2
+          memory: 2Gi
+      persistence:
+        enabled: false
+      cache:
+        enabled: true
+        storageClass: <storage-class>
+        accessMode: ReadWriteOnce
+        size: 5Gi 

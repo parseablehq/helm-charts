@@ -1,13 +1,15 @@
 {{- $p := .Values.parseable }}
-{{- $alerts := default (dict) $p.alerts }}
-{{- $targets := default (list) $p.targets }}
-{{- if or $alerts.enabled (hasKey $p "targets") }}
-{{- if and $alerts.enabled (not $alerts.label) }}
-  {{- fail "alerts.label is required when alerts.enabled is true" }}
-{{- end }}
-{{- if and $alerts.enabled (not $alerts.labelValue) }}
-  {{- fail "alerts.labelValue is required when alerts.enabled is true" }}
-{{- end }}
+{{- include "parseable.validateAsCodeSection" (dict "values" $p "section" "alerts") }}
+{{- include "parseable.validateAsCodeSection" (dict "values" $p "section" "targets") }}
+{{- $manageAlerts := and (hasKey $p "alerts") (kindIs "map" $p.alerts) $p.alerts.enabled }}
+{{- $manageTargets := and (hasKey $p "targets") (kindIs "map" $p.targets) $p.targets.enabled }}
+{{- if and $manageAlerts (not (hasKey $p.alerts "items")) }}{{- fail "parseable.alerts.items is required when enabled is true." }}{{- end }}
+{{- if and $manageTargets (not (hasKey $p.targets "items")) }}{{- fail "parseable.targets.items is required when enabled is true." }}{{- end }}
+{{- $alerts := list }}
+{{- $targets := list }}
+{{- if $manageAlerts }}{{- $alerts = $p.alerts.items }}{{- end }}
+{{- if $manageTargets }}{{- $targets = $p.targets.items }}{{- end }}
+{{- if or $manageAlerts $manageTargets }}
 {{- $seenTargetTitles := dict }}
 {{- $seenTargetIDs := dict }}
 {{- range $index, $item := $targets }}
@@ -49,6 +51,49 @@
     {{- end }}
   {{- end }}
 {{- end }}
+{{- $alertItems := list }}
+{{- $inlineNames := dict }}
+{{- $externalNames := dict }}
+{{- if $manageAlerts }}
+  {{- range $index, $item := $alerts }}
+    {{- range $field := keys $item }}
+      {{- if not (has $field (list "name" "json" "configMap" "namespace")) }}
+        {{- fail (printf "Unknown alerts[%d] field %q. Use name and exactly one of json or configMap; namespace is only valid with configMap." $index $field) }}
+      {{- end }}
+    {{- end }}
+    {{- if and (hasKey $item "name") (not (trim $item.name)) }}{{- fail (printf "alerts[%d]: name cannot be empty." $index) }}{{- end }}
+    {{- if eq (hasKey $item "json") (hasKey $item "configMap") }}
+      {{- fail (printf "alerts[%d]: set exactly one of json or configMap." $index) }}
+    {{- end }}
+    {{- if hasKey $item "json" }}
+      {{- if hasKey $item "namespace" }}{{- fail (printf "alerts[%d]: namespace is only valid with configMap." $index) }}{{- end }}
+      {{- if not (trim $item.json) }}{{- fail (printf "alerts[%d]: json cannot be empty." $index) }}{{- end }}
+      {{- if gt (len $item.json) 900000 }}{{- fail (printf "alerts[%d]: inline JSON exceeds 900 KB. Use a separate ConfigMap for this alert." $index) }}{{- end }}
+      {{- $cm := include "parseable.inlineAlertConfigMapName" (dict "root" $ "item" $item "index" $index) }}
+      {{- if hasKey $inlineNames (printf "%s/%s" $.Release.Namespace $cm) }}{{- fail (printf "alerts[%d]: duplicate inline alert name; each alert needs a unique name or JSON title." $index) }}{{- end }}
+      {{- $_ := set $inlineNames (printf "%s/%s" $.Release.Namespace $cm) true }}
+      {{- $entry := dict "configMap" $cm "namespace" $.Release.Namespace }}
+      {{- if hasKey $item "name" }}{{- $_ := set $entry "name" (trim $item.name) }}{{- end }}
+      {{- $alertItems = append $alertItems $entry }}
+    {{- else }}
+      {{- $cm := trim (default "" $item.configMap) }}
+      {{- $ns := trim (default "" $item.namespace) }}
+      {{- if not $ns }}{{- fail (printf "alerts[%d]: namespace is required with configMap." $index) }}{{- end }}
+      {{- if or (gt (len $cm) 253) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" $cm)) }}{{- fail (printf "alerts[%d]: configMap must be a valid Kubernetes ConfigMap name." $index) }}{{- end }}
+      {{- range $part := splitList "." $cm }}
+        {{- if gt (len $part) 63 }}{{- fail (printf "alerts[%d]: each part of configMap name must be at most 63 characters." $index) }}{{- end }}
+      {{- end }}
+      {{- if or (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $ns)) (gt (len $ns) 63) }}{{- fail (printf "alerts[%d]: namespace must be a valid Kubernetes namespace name." $index) }}{{- end }}
+      {{- $_ := set $externalNames (printf "%s/%s" $ns $cm) true }}
+      {{- $entry := dict "configMap" $cm "namespace" $ns }}
+      {{- if hasKey $item "name" }}{{- $_ := set $entry "name" (trim $item.name) }}{{- end }}
+      {{- $alertItems = append $alertItems $entry }}
+    {{- end }}
+  {{- end }}
+  {{- range $name := keys $externalNames }}
+    {{- if hasKey $inlineNames $name }}{{- fail (printf "ConfigMap %s is generated for an inline alert; choose a different external ConfigMap name." $name) }}{{- end }}
+  {{- end }}
+{{- end }}
 {{- $fullname := include "parseable.fullname" . }}
 {{- $target := printf "%s-querier-service" $fullname }}
 {{- if eq $p.deploymentMode "standalone" }}
@@ -59,7 +104,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ $fullname }}-alerts
+  name: {{ printf "%s-alerts-and-targets" (trunc 44 $fullname | trimSuffix "-") }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "parseable.labels" . | nindent 4 }}
@@ -77,10 +122,13 @@ spec:
         {{- include "parseable.labels" . | nindent 8 }}
     spec:
       restartPolicy: Never
-      serviceAccountName: {{ $fullname }}-alerts
+      {{- if $manageAlerts }}
+      serviceAccountName: {{ $fullname }}-alert-reader
+      {{- else }}
+      automountServiceAccountToken: false
+      {{- end }}
       securityContext:
         {{- toYaml $p.podSecurityContext | nindent 8 }}
-      {{- include "parseable.waitForApi" . | nindent 6 }}
       containers:
         - name: reconcile-alerts
           image: docker.io/library/python:3.12-alpine
@@ -89,14 +137,13 @@ spec:
           args:
             - |-
               import base64
-              import binascii
               import json
               import os
               import re
-              import ssl
               import sys
+              import time
               from urllib.error import HTTPError, URLError
-              from urllib.parse import quote, urlencode
+              from urllib.parse import quote
               from urllib.request import Request, urlopen
 
               base = os.environ["PARSEABLE_BASE_URL"].rstrip("/")
@@ -105,41 +152,75 @@ spec:
               ).decode()
               ulid_pattern = re.compile(r'^[0-7][0-9A-HJKMNP-TV-Z]{25}$')
 
-              def kubernetes_get(path, query=None):
-                  namespace = os.environ["POD_NAMESPACE"]
-                  url = f'https://kubernetes.default.svc/api/v1/namespaces/{namespace}/{path}'
-                  if query:
-                      url += '?' + urlencode(query)
-                  with open('/var/run/secrets/kubernetes.io/serviceaccount/token', encoding='utf-8') as file:
-                      token = file.read()
-                  req = Request(url, headers={"Authorization": f"Bearer {token}"})
-                  context = ssl.create_default_context(
-                      cafile='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
-                  )
-                  try:
-                      with urlopen(req, context=context, timeout=30) as response:
-                          return json.load(response)
-                  except HTTPError as error:
-                      raise ValueError(f'Kubernetes API {path}: HTTP {error.code}') from error
+              TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+              CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 
-              def secret_value(title, ref, field):
+              def read_configmap(namespace, name, token, context):
+                  url = (
+                      "https://kubernetes.default.svc/api/v1/namespaces/"
+                      f"{quote(namespace, safe='')}/configmaps/{quote(name, safe='')}"
+                  )
+                  req = Request(url, headers={"Authorization": f"Bearer {token}"})
+                  try:
+                      with urlopen(req, timeout=15, context=context) as response:
+                          configmap = json.load(response)
+                  except json.JSONDecodeError as error:
+                      raise ValueError(f"Kubernetes returned invalid ConfigMap data for {namespace}/{name}") from error
+                  except HTTPError as error:
+                      if error.code == 404:
+                          raise ValueError(f"ConfigMap {namespace}/{name} was not found; create it before running Helm") from error
+                      if error.code == 403:
+                          raise ValueError(f"cannot read ConfigMap {namespace}/{name}; grant the alert Job get permission in that namespace") from error
+                      raise ValueError(f"reading ConfigMap {namespace}/{name} returned HTTP {error.code}") from error
+                  except (URLError, TimeoutError) as error:
+                      raise ValueError(f"cannot reach Kubernetes API while reading ConfigMap {namespace}/{name}") from error
+                  if not isinstance(configmap, dict):
+                      raise ValueError(f"Kubernetes returned invalid ConfigMap {namespace}/{name}")
+                  data = configmap.get("data") or {}
+                  if not isinstance(data, dict) or len(data) != 1 or configmap.get("binaryData"):
+                      raise ValueError(f"ConfigMap {namespace}/{name} must have exactly one text entry in data and no binaryData")
+                  key, content = next(iter(data.items()))
+                  if not isinstance(content, str) or not content.strip():
+                      raise ValueError(f"ConfigMap {namespace}/{name} key {key!r} is empty")
+                  try:
+                      alert = json.loads(content)
+                  except (UnicodeError, json.JSONDecodeError) as error:
+                      raise ValueError(f"ConfigMap {namespace}/{name} key {key!r} contains invalid alert JSON: {error}") from error
+                  if not isinstance(alert, dict):
+                      raise ValueError(f"ConfigMap {namespace}/{name} key {key!r} must contain a JSON object")
+                  return alert
+
+              def discover_alerts():
+                  import ssl
+
+                  items = json.loads(os.environ["ALERT_ITEMS"])
+                  if not isinstance(items, list):
+                      raise ValueError("alerts must be a list")
+                  if not items:
+                      return []
+                  with open(TOKEN_PATH, encoding="utf-8") as stream:
+                      token = stream.read().strip()
+                  context = ssl.create_default_context(cafile=CA_PATH)
+                  configured = []
+                  for item in items:
+                      namespace, name = item["namespace"], item["configMap"]
+                      alert = read_configmap(namespace, name, token, context)
+                      if "name" in item:
+                          alert["title"] = item["name"]
+                      configured.append((f"ConfigMap {namespace}/{name}", alert))
+                  return configured
+
+              def secret_value(title, ref, field, index):
                   if not isinstance(ref, dict) or not ref.get("name") or not ref.get("key"):
                       raise ValueError(f'target {title!r}: {field}SecretRef needs name and key')
-                  secret_name, secret_key = ref["name"], ref["key"]
-                  secret = kubernetes_get('secrets/' + quote(secret_name, safe=''))
-                  encoded = secret.get("data", {}).get(secret_key)
-                  if not encoded:
+                  value = os.environ.get(f'TARGET_{field.upper()}_{index}')
+                  if not value:
                       raise ValueError(
-                          f'target {title!r}: Secret {secret_name!r} has no {secret_key!r} field'
+                          f'target {title!r}: Secret {ref["name"]!r} has no {ref["key"]!r} field or it is empty'
                       )
-                  try:
-                      return base64.b64decode(encoded, validate=True).decode('utf-8')
-                  except (binascii.Error, ValueError, UnicodeDecodeError) as error:
-                      raise ValueError(
-                          f'target {title!r}: Secret {secret_name!r} field {secret_key!r} is invalid'
-                      ) from error
+                  return value
 
-              def target_from_values(data):
+              def target_from_values(data, index):
                   if not isinstance(data, dict):
                       raise ValueError('each targets entry must be an object')
                   title, kind, id = data.get("title"), data.get("type"), data.get("id")
@@ -157,7 +238,7 @@ spec:
                   unknown = set(data) - allowed
                   if unknown:
                       raise ValueError(f'target {title!r}: unknown field(s): {", ".join(sorted(unknown))}')
-                  endpoint = secret_value(title, data.get("endpointSecretRef"), "endpoint").strip()
+                  endpoint = secret_value(title, data.get("endpointSecretRef"), "endpoint", index).strip()
                   if not endpoint:
                       raise ValueError(f'target {title!r}: endpoint Secret field is empty')
                   # The UI calls this field Title; the Parseable API calls it name.
@@ -182,8 +263,8 @@ spec:
                       if bool(username_ref) != bool(password_ref):
                           raise ValueError(f'target {title!r}: usernameSecretRef and passwordSecretRef must be set together')
                       if username_ref:
-                          username = secret_value(title, username_ref, "username")
-                          password = secret_value(title, password_ref, "password")
+                          username = secret_value(title, username_ref, "username", index)
+                          password = secret_value(title, password_ref, "password", index)
                           if not username.strip() or not password:
                               raise ValueError(f'target {title!r}: AlertManager username and password Secret fields must not be empty')
                           target["username"] = username
@@ -191,11 +272,12 @@ spec:
                   return target
 
               def discover():
+                  source_alerts = discover_alerts() if os.environ["ALERTS_ENABLED"] == "true" else []
                   configured_targets = []
                   seen_target_names = set()
                   seen_target_ids = set()
-                  for data in json.loads(os.environ["CONFIGURED_TARGETS"]):
-                      target = target_from_values(data)
+                  for index, data in enumerate(json.loads(os.environ["CONFIGURED_TARGETS"])):
+                      target = target_from_values(data, index)
                       if target["name"] in seen_target_names:
                           raise ValueError(f'duplicate target title {target["name"]!r} in values')
                       if target["id"] in seen_target_ids:
@@ -204,46 +286,33 @@ spec:
                       seen_target_ids.add(target["id"])
                       configured_targets.append((target["name"], target))
 
-                  alerts = []
+                  configured_alerts = []
                   if os.environ["ALERTS_ENABLED"] != "true":
-                      return configured_targets, alerts
-                  selector = f'{os.environ["ALERT_LABEL"]}={os.environ["ALERT_LABEL_VALUE"]}'
-                  configmaps = kubernetes_get('configmaps', {"labelSelector": selector})["items"]
-                  seen_titles = set()
-                  seen_alert_ids = set()
-                  for configmap in configmaps:
-                      name = configmap["metadata"]["name"]
-                      data = configmap.get("data", {})
-                      if "alert.json" not in data:
-                          raise ValueError(f'ConfigMap {name!r}: alert.json is required; define targets under parseable.targets in Helm values')
-                      try:
-                          alert = json.loads(data["alert.json"])
-                      except json.JSONDecodeError as error:
-                          raise ValueError(f'ConfigMap {name!r} field alert.json has invalid JSON: {error}') from error
-                      if not isinstance(alert, dict):
-                          raise ValueError(f'ConfigMap {name!r} field alert.json must be a JSON object')
+                      return configured_targets, configured_alerts
+                  seen_titles, seen_alert_ids = set(), set()
+                  for source, alert in source_alerts:
                       title = alert.get("title")
                       if not isinstance(title, str) or not title.strip():
-                          raise ValueError(f'ConfigMap {name!r}: alert title is required')
+                          raise ValueError(f'{source}: alert title is required')
                       alert_id = alert.get("id")
                       if "id" in alert and (not isinstance(alert_id, str) or not ulid_pattern.fullmatch(alert_id)):
-                          raise ValueError(f'ConfigMap {name!r}: alert id must be a canonical 26-character ULID starting with 0-7')
+                          raise ValueError(f'{source}: alert id must be a canonical 26-character ULID starting with 0-7')
                       if alert_id is not None:
                           if alert_id in seen_alert_ids:
-                              raise ValueError(f'duplicate alert id {alert_id!r} in selected ConfigMaps')
+                              raise ValueError(f'duplicate alert id {alert_id!r} in alerts')
                           seen_alert_ids.add(alert_id)
                       if title in seen_titles:
-                          raise ValueError(f'duplicate alert title {title!r} in selected ConfigMaps')
+                          raise ValueError(f'duplicate alert title {title!r} in alerts')
                       seen_titles.add(title)
-                      alert_target_ids = alert.get("targets")
-                      if not isinstance(alert_target_ids, list) or not alert_target_ids or any(
-                          not isinstance(target, str) or not ulid_pattern.fullmatch(target) for target in alert_target_ids
+                      target_ids = alert.get("targets")
+                      if not isinstance(target_ids, list) or not target_ids or any(
+                          not isinstance(target, str) or not ulid_pattern.fullmatch(target) for target in target_ids
                       ):
-                          raise ValueError(f'ConfigMap {name!r}: targets must be a nonempty list of target ULIDs')
-                      if len(alert_target_ids) != len(set(alert_target_ids)):
-                          raise ValueError(f'ConfigMap {name!r}: targets contains duplicate target IDs')
-                      alerts.append((name, alert))
-                  return configured_targets, alerts
+                          raise ValueError(f'{source}: targets must be a nonempty list of target ULIDs')
+                      if len(target_ids) != len(set(target_ids)):
+                          raise ValueError(f'{source}: targets contains duplicate target IDs')
+                      configured_alerts.append((source, alert))
+                  return configured_targets, configured_alerts
 
               def request(method, endpoint, payload=None):
                   body = None if payload is None else json.dumps(payload).encode()
@@ -289,8 +358,21 @@ spec:
                           return alerts
                       offset += len(page)
 
+              def wait_for_api():
+                  deadline = time.monotonic() + 120
+                  url = base + "/api/v1/readiness"
+                  while True:
+                      try:
+                          with urlopen(url, timeout=5):
+                              return
+                      except (HTTPError, URLError, TimeoutError):
+                          if time.monotonic() >= deadline:
+                              raise ValueError("Parseable API did not become ready within 120 seconds")
+                          time.sleep(5)
+
               try:
                   configured_targets, configured_alerts = discover()
+                  wait_for_api()
                   manage_targets = os.environ["MANAGE_TARGETS"] == "true"
                   manage_alerts = os.environ["ALERTS_ENABLED"] == "true"
                   desired_target_ids = {target["id"] for _, target in configured_targets}
@@ -332,7 +414,7 @@ spec:
 
                   changes = []
                   seen_resolved_ids = set()
-                  for configmap_name, alert in configured_alerts:
+                  for source, alert in configured_alerts:
                       title = alert["title"]
                       requested_id = alert.get("id")
                       title_matches = alerts_by_title.get(title, [])
@@ -347,7 +429,7 @@ spec:
                           raise ValueError(f'alert title {title!r} already belongs to another alert')
                       if alert_id is not None:
                           if alert_id in seen_resolved_ids:
-                              raise ValueError(f'alert id {alert_id!r} is selected by more than one ConfigMap')
+                              raise ValueError(f'alert id {alert_id!r} is selected by more than one configured alert')
                           seen_resolved_ids.add(alert_id)
                       missing = [id for id in alert["targets"] if id not in targets_by_id]
                       if missing:
@@ -361,7 +443,6 @@ spec:
                       payload = dict(alert)
                       for field in ("version", "state", "notificationState", "created", "lastTriggeredAt"):
                           payload.pop(field, None)
-                      payload.pop("parseableHelmConfigMap", None)
                       if alert_id is not None:
                           payload["id"] = alert_id
                       changes.append((title, existing is not None, alert_id, payload))
@@ -431,17 +512,35 @@ spec:
             - name: CONFIGURED_TARGETS
               value: {{ toJson $targets | quote }}
             - name: MANAGE_TARGETS
-              value: {{ ternary "true" "false" (hasKey $p "targets") | quote }}
+              value: {{ ternary "true" "false" $manageTargets | quote }}
             - name: ALERTS_ENABLED
-              value: {{ ternary "true" "false" (default false $alerts.enabled) | quote }}
-            - name: ALERT_LABEL
-              value: {{ default "" $alerts.label | quote }}
-            - name: ALERT_LABEL_VALUE
-              value: {{ default "" $alerts.labelValue | quote }}
-            - name: POD_NAMESPACE
+              value: {{ ternary "true" "false" $manageAlerts | quote }}
+            {{- if $manageAlerts }}
+            - name: ALERT_ITEMS
+              value: {{ toJson $alertItems | quote }}
+            {{- end }}
+            {{- range $index, $item := $targets }}
+            - name: TARGET_ENDPOINT_{{ $index }}
               valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
+                secretKeyRef:
+                  name: {{ $item.endpointSecretRef.name | quote }}
+                  key: {{ $item.endpointSecretRef.key | quote }}
+                  optional: true
+            {{- if and (eq $item.type "alertManager") $item.usernameSecretRef }}
+            - name: TARGET_USERNAME_{{ $index }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $item.usernameSecretRef.name | quote }}
+                  key: {{ $item.usernameSecretRef.key | quote }}
+                  optional: true
+            - name: TARGET_PASSWORD_{{ $index }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $item.passwordSecretRef.name | quote }}
+                  key: {{ $item.passwordSecretRef.key | quote }}
+                  optional: true
+            {{- end }}
+            {{- end }}
             - name: PARSEABLE_BASE_URL
               value: {{ printf "http://%s.%s" $target .Release.Namespace | quote }}
             - name: P_USERNAME

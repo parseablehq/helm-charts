@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=../charts/parseable/values.schema.json
+# OSS standalone: one pod with data and staging stored on PVCs.
+# Create parseable-env-secret in the release namespace with addr, username, and password. 
+# Replace <storage-class> with the desired StorageClass.
+
+parseable:
+  deploymentMode: standalone
+
+  image:
+    repository: quay.io/parseablehq/parseable
+    tag: "" # Defaults to the Helm chart appVersion
+    pullPolicy: Always
+
+  store:
+    # Local storage: local-store
+    # MinIO and Amazon S3: s3-store
+    # Google Cloud Storage: gcs-store
+    # Azure Blob Storage: blob-store
+    type: local-store
+    secretName: parseable-env-secret
+    # Google Cloud Storage only: uncomment this block.
+    # gcsCredentials:
+    #   secretName: parseable-gcs-key
+    #   secretKey: key.json
+    #   mountPath: /var/secrets/google
+
+  standalone:
+    unified:
+      env:
+        RUST_LOG: warn
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: 500m
+          memory: 2Gi
+      persistence:
+        staging:
+          enabled: true
+          storageClass: <storage-class>
+          accessMode: ReadWriteOnce
+          size: 5Gi
+        data:
+          enabled: true
+          storageClass: <storage-class>
+          accessMode: ReadWriteOnce
+          size: 5Gi

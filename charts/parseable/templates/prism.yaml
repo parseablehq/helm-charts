@@ -4,6 +4,7 @@
 {{- end }}
 {{- $p := .Values.parseable }}
 {{- $ent := $p.enterprise }}
+{{- include "parseable.validateEnterpriseLicense" . }}
 {{- $node := $p.distributed.prism }}
 {{- $store := $p.store }}
 {{- $secret := $store.secretName }}
@@ -120,9 +121,11 @@ spec:
           secret:
             secretName: {{ $store.gcsCredentials.secretName }}
         {{- end }}
+        {{- if (not (empty $ent.license.signature.source)) }}
         - name: license
           secret:
-            secretName: {{ $ent.license.secretName }}
+            secretName: {{ default "parseable-license" $ent.license.secretName }}
+        {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
@@ -189,8 +192,9 @@ spec:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: "{{ $store.gcsCredentials.mountPath }}/{{ $store.gcsCredentials.secretKey }}"
             {{- end }}
+            {{- if (not (empty $ent.license.signature.source)) }}
             - name: P_LICENSE_DATA_FILE_PATH
-              value: "{{ $ent.license.mountPath }}/{{ $ent.license.dataKey }}"
+              value: "{{ default "/tmp/license" $ent.license.mountPath }}/{{ default "parseable_license.json" $ent.license.dataKey }}"
             {{- if eq $ent.license.signature.source "base64" }}
             - name: P_LICENSE_SIGNATURE_BASE64
               valueFrom:
@@ -199,7 +203,8 @@ spec:
                   key: {{ $ent.license.signature.base64.key }}
             {{- else }}
             - name: P_LICENSE_SIGNATURE_FILE_PATH
-              value: "{{ $ent.license.mountPath }}/{{ $ent.license.signature.key }}"
+              value: "{{ default "/tmp/license" $ent.license.mountPath }}/{{ default "parseable_license.sig" $ent.license.signature.key }}"
+            {{- end }}
             {{- end }}
             {{- if $ent.auditLogging.enabled }}
             - name: P_AUDIT_LOGGER
@@ -235,9 +240,11 @@ spec:
               mountPath: {{ $store.gcsCredentials.mountPath }}
               readOnly: true
             {{- end }}
+            {{- if (not (empty $ent.license.signature.source)) }}
             - name: license
-              mountPath: {{ $ent.license.mountPath }}
+              mountPath: {{ default "/tmp/license" $ent.license.mountPath }}
               readOnly: true
+            {{- end }}
   {{- if or $node.persistence.enabled $node.cache.enabled }}
   volumeClaimTemplates:
     {{- if $node.persistence.enabled }}

@@ -27,15 +27,16 @@ parseable:
   ##               OSS only.
   ## distributed - separate ingestor + querier pods (the `distributed.ingestor`
   ##               / `distributed.querier` sections), plus `distributed.prism`
-  ##               when `enterprise.enabled` is true. Required for Enterprise.
+  ##               when `enterprise.enabled` is true.
   deploymentMode: standalone
 
   ## OSS image, used by every node type unless enterprise.enabled is true
-  ## (see enterprise.image below, which takes over in that case).
+  ## see enterprise.image below, which takes precedence if enterprise.enabled is true.
   image:
     repository: quay.io/parseablehq/parseable
     tag: "" # defaults to .Chart.AppVersion
     pullPolicy: IfNotPresent
+
   ## Names of imagePullSecrets for pulling the image above, e.g. from a private registry.
   imagePullSecrets: []
 
@@ -121,29 +122,19 @@ parseable:
       pullPolicy: IfNotPresent
     imagePullSecrets: []
 
-    ## License is validated at startup; the server refuses to start without one.
-    ## The license DATA is always mounted read-only from `secretName` at
-    ## `mountPath` on every node (P_LICENSE_DATA_FILE_PATH).
-    ##   kubectl create secret generic parseable-license \
-    ##     --from-file=parseable_license.json=resources/parseable_license.json \
-    ##     --from-file=parseable_license.sig=resources/parseable_license.sig
-    ##
-    ## The license SIGNATURE can be supplied one of two ways:
-    ##   source: file   - mounted from `secretName` (P_LICENSE_SIGNATURE_FILE_PATH)
-    ##   source: base64 - base64 string from an existing secret via secretKeyRef
-    ##                    (P_LICENSE_SIGNATURE_BASE64), e.g.
-    ##     kubectl create secret generic parseable-env-secret \
-    ##       --from-literal=license.signature.base64=$(base64 -w0 resources/parseable_license.sig)
+    ## License is an optional configuration for Enterprise deployments.
+    ## - If no license fields provided: use the built-in trial license (image v3.2.7+).
+    ## - If secretName + dataKey are provided: install the license v3.
+    ## - If secretName + dataKey + signature: mount legacy license files on every Enterprise pod; no license Job runs.
+    ## Parseable releases older than v3.2.7 require the legacy signature configuration.
     license:
-      secretName: parseable-license
-      mountPath: /tmp/license
-      dataKey: parseable_license.json
+      secretName: ""
+      mountPath: "" # optional; defaults to /tmp/license for legacy files
+      dataKey: ""
       signature:
-        source: file # file | base64
-        ## file mode: key/filename inside `secretName`, mounted at `mountPath`.
-        key: parseable_license.sig
-        ## base64 mode only: existing secret holding the base64-encoded signature.
-        ## Ignored when source is file; uncomment and set when source is base64.
+        source: "" # file | base64; omit for the combined JSON API Job
+        key: "" # filename inside secretName when source is file
+        ## Existing base64 signature Secret reference when source is base64.
         base64: {}
           # secretName: parseable-env-secret
           # key: license.signature.base64
@@ -152,6 +143,7 @@ parseable:
     ## Applied to every node type (ingestor/querier/prism).
     auditLogging:
       enabled: false
+      ## Change these fields to point to the appropriate Parseable server and credentials.
       server: "http://parseable-querier-service.parseable.svc.cluster.local"
       username: admin
       password: admin
@@ -196,7 +188,7 @@ parseable:
   ## Node types
   ## =========================================================================
 
-  ## --- standalone --- (deploymentMode: standalone, OSS only) ---------------
+  ## --- standalone --- (deploymentMode: standalone) ---------------
   standalone:
     ## Single StatefulSet pod running every function (ingest + query + storage).
     unified:
@@ -328,6 +320,7 @@ parseable:
         httpGet:
           path: /api/v1/readiness
           port: 8000
+        timeoutSeconds: 5
 
     ## querier (OSS + Enterprise) - serves queries and the console. OSS supports
     ## a single querier; Enterprise can run multiple queriers behind prism.
@@ -400,6 +393,7 @@ parseable:
         httpGet:
           path: /api/v1/readiness
           port: 8000
+        timeoutSeconds: 5
 
     ## prism (Enterprise only) - cluster coordinator, fronts the querier fleet.
     ## Deployed automatically whenever enterprise.enabled is true.
@@ -452,107 +446,165 @@ parseable:
         httpGet:
           path: /api/v1/readiness
           port: 8000
+        initialDelaySeconds: 5
+        timeoutSeconds: 5
 
-  ## Create datasets and set their retention on install/upgrade.
-  ## Each dataset requires name, telemetryType, and logSource.
-  ## telemetryType: logs, metrics, traces.
-  ## logSource: json, otel-logs, otel-metrics, otel-traces.
-  ## OTel sources require their matching telemetry type. Tags and retention are optional.
-  ## Type and source apply at creation only.
-  ## Enterprise reconciles tags on upgrade; OSS applies tags on creation only.
-  ## Supported tag: agent-observability.
-  ## agent-observability requires an otel-traces dataset.
-  ##   - name: "sample-dataset"
-  ##     telemetryType: traces
-  ##     logSource: otel-traces
-  ##     tags: ["agent-observability"]
-  ##     retention:
-  ##       durationDays: 30d
-  ## Retention accepts 1d to 3650d; 0d or an empty value removes it.
-  ## Smart Cache is Enterprise-only. size must be at least 10Gi; the
-  ## Enterprise querier hot-tier volume must have enough usable disk space.
-  ## Omit datasets to leave them untouched; set datasets: [] to delete all datasets.
+  ## -----------------------------------------------------------------------
+  ## Parseable resources as code
+  ## -----------------------------------------------------------------------
+  ## Set enabled: true and list resources under items to reconcile on install
+  ## and upgrade. Omit a section or set enabled: false to leave it unchanged.
+  ## The items list is the complete desired set; items: [] deletes all resources
+  ## of that type, including ones created through the UI.
 
-  ## Register API keys after datasets are ready. Set apiKeyType to ingestor for
-  ## global ingest access or query for the reader privilege on all datasets.
-  ## apiKeyType is required for every API key. Use secretKeyRef for
-  ## a caller-provided key, or omit it to let Parseable generate a key. Newly
-  ## generated keys are printed once in Helm output and also appear in Job and
-  ## CI logs; save them securely. Never put key values directly in values.yaml.
-  ## Secret values must be hyphenated UUID v4 strings.
-  ## Existing matching keys are left unchanged if they already have the
-  ## server-managed role for their apiKeyType. Other keys need explicit replacement.
-  ## Existing key values can be rotated. A value swap uses a temporary key
-  ## value and can be resumed by rerunning Helm if an update fails.
-  ## When apiKeys is present, keys omitted from the list are revoked.
-  ## Omit apiKeys to leave them untouched; set apiKeys: [] to revoke all API keys.
-  ##   - name: application-logs-key
-  ##     apiKeyType: ingestor
-  ##     secretKeyRef:
-  ##       name: parseable-api-keys
-  ##       key: LOGS_KEY
-  ##   - name: generated-key
-  ##     apiKeyType: query
-
-  ## Reconcile dashboards from ConfigMaps on each Helm install and upgrade.
-  ## Label each ConfigMap with parseable_dashboard: "1" and put one exported
-  ## dashboard JSON in a .json data field. The ConfigMap metadata.name is the
-  ## dashboard title; a title inside the JSON is ignored.
-  ## With enabled: true, dashboards absent from selected ConfigMaps are deleted.
-  ## If no ConfigMaps match, all existing dashboards are deleted. Omit this block
-  ## or set enabled: false to leave dashboards untouched.
+  ## DATASETS
+  ## Required: name, telemetryType, logSource.
+  ##   telemetryType: logs | metrics | traces
+  ##   logSource: json | otel-logs | otel-metrics | otel-traces
+  ## Use matching OpenTelemetry types and sources (logs/otel-logs, etc.).
+  ## Optional: tags, retention.durationDays, smartCache.size.
+  ##   tags: agent-observability (requires an otel-traces dataset).
+  ##   retention.durationDays: 1d-3650d; 0d or "" removes retention.
+  ##   smartCache.size: Enterprise only, minimum 10Gi; allow enough hot-tier disk.
+  ## Telemetry type and log source are set at creation. Enterprise updates tags;
+  ## OSS applies tags at creation. Keep the name stable: changing it creates a
+  ## new dataset and deletes the old one, including its data.
+  ## With enabled: true, datasets absent from items are deleted.
+  ## Set items: [] to delete all datasets; enabled: false leaves them unchanged.
   ##
-  ##   dashboards:
-  ##     enabled: true
-  ##     label: parseable_dashboard
-  ##     labelValue: "1"
+  # datasets:
+  #   enabled: true
+  #   items:
+  #     - name: payment-traces
+  #       telemetryType: traces
+  #       logSource: otel-traces
+  #       tags: [agent-observability]  # Optional
+  #       retention:                  # Optional
+  #         durationDays: 30d
+  #       smartCache:                 # Optional; Enterprise only
+  #         size: 10Gi
 
-  ## Create or update alert targets on install/upgrade. Targets are created
-  ## before alerts. Store endpoints and passwords in existing Kubernetes Secrets.
-  ## Type: slack, webhook, or alertManager. Webhook supports customHeaders;
-  ## webhook and AlertManager support skipTlsCheck. AlertManager can use
-  ## usernameSecretRef together with passwordSecretRef. Omit targets to leave
-  ## existing targets unchanged. Use targets: [] to delete all existing
-  ## targets. Removing one entry deletes that target after alerts are reconciled.
-  ## Changing a target ID under the same title replaces the old target only
-  ## when no alert uses it. Remove or switch those alerts first.
+  ## API KEYS
+  ## Required: name, apiKeyType (ingestor | query).
+  ##   ingestor: ingest across datasets.
+  ##   query: reader access across datasets.
+  ## Optional: secretKeyRef for a UUID v4 key stored in a Kubernetes Secret.
+  ## For a new key without secretKeyRef, Parseable generates its value and
+  ## prints it in Helm/Job output. CI logs can retain it; save it securely.
+  ## Keep key values out of values.yaml. A key can be matched for a name change
+  ## by its value, or for a value change by its name. Changing apiKeyType
+  ## requires revoking and recreating the key.
+  ## With enabled: true, keys absent from items are revoked.
+  ## Set items: [] to revoke all keys; enabled: false leaves them unchanged.
   ##
-  ##   targets:
-  ##     - id: 01K9QQ9QC51KD43TE4HTJ4MW1D
-  ##       title: payments-webhook
-  ##       type: webhook
-  ##       endpointSecretRef:
-  ##         name: alert-target-secrets
-  ##         key: PAYMENTS_URL
-  ##       skipTlsCheck: false
-  ##       customHeaders:
-  ##         X-Team: payments
-  ##     - id: 01K9QQ9QC51KD43TE4HTJ4MW1E
-  ##       title: ops-alertmanager
-  ##       type: alertManager
-  ##       endpointSecretRef:
-  ##         name: alert-target-secrets
-  ##         key: ALERTMANAGER_URL
-  ##       usernameSecretRef:
-  ##         name: alert-target-secrets
-  ##         key: ALERTMANAGER_USERNAME
-  ##       passwordSecretRef:
-  ##         name: alert-target-secrets
-  ##         key: ALERTMANAGER_PASSWORD
+  # apiKeys:
+  #   enabled: true
+  #   items:
+  #     - name: payment-ingest
+  #       apiKeyType: ingestor
+  #       secretKeyRef:                # Optional; omit to generate a key on terminal
+  #         name: parseable-api-keys
+  #         key: PAYMENT_KEY
+  #     - name: payment-query
+  #       apiKeyType: query
 
-  ## Reconcile alerts from labeled ConfigMaps on Helm upgrades. Each matching
-  ## ConfigMap needs alert.json with target IDs in targets. Alert id is optional:
-  ## without one, the Job matches by unique title and lets the server generate
-  ## an ID for new alerts. Supply the existing alert ID to rename its title.
-  ## An explicit ID remains stable across clusters. Duplicate existing titles
-  ## cause an error. Alerts absent from the selected ConfigMaps are deleted;
-  ## an empty selection deletes all existing alerts when enabled is true.
-  ## Apply ConfigMaps before running Helm; edits alone do not trigger the Job.
+  ## DASHBOARDS
+  ## Set enabled: true and list dashboards under items. Each entry needs a
+  ## unique name (the title shown in Parseable) and exactly one source:
+  ## json: complete exported dashboard JSON pasted into values, or
+  ## configMap: exact name of an existing ConfigMap with one JSON entry in data.
+  ## The data key can have any name. The chart creates a ConfigMap for each
+  ## inline JSON item. Every configMap item needs namespace, including
+  ## ConfigMaps in the Helm release namespace.
+  ## The Job validates every entry before changing Parseable. Dashboards absent
+  ## from items are deleted, including UI-created ones. Set items: [] to
+  ## delete all dashboards; enabled: false leaves them unchanged.
+  ## Run helm upgrade after changing values or an external ConfigMap.
+  ## The Helm installer must be allowed to create a read-only Role and
+  ## RoleBinding in each referenced namespace.
   ##
-  ##   alerts:
-  ##     enabled: true
-  ##     label: parseable_alert
-  ##     labelValue: "1"
+  # dashboards:
+  #   enabled: true
+  #   items:
+  #     - name: payments
+  #       json: |
+  #         {"tiles": []}
+  #     - name: orders
+  #       configMap: orders-dashboard
+  #       namespace: parseable
+  #     - name: operations
+  #       configMap: operations-dashboard
+  #       namespace: monitoring
+
+  ## ALERT TARGETS
+  ## Required: id (26-character ULID), title, type, endpointSecretRef.
+  ##   type: slack | webhook | alertManager.
+  ## Store endpoints and credentials in Kubernetes Secrets.
+  ## Optional by type:
+  ##   webhook: skipTlsCheck, customHeaders.
+  ##   alertManager: skipTlsCheck, usernameSecretRef and passwordSecretRef
+  ##                 together. Slack accepts no additional fields.
+  ## Targets are applied before alerts. Keep id and title stable. A title
+  ## cannot change in place; changing an ID under the same title requires that
+  ## no alert uses the old ID.
+  ## With enabled: true, targets absent from items are deleted after alerts.
+  ## Set items: [] to request deletion of all targets; enabled: false leaves
+  ## them unchanged. The server may reject deletion of targets in use.
+  ##
+  # targets:
+  #   enabled: true
+  #   items:
+  #     - id: 01K9QQ9QC51KD43TE4HTJ4MW1D
+  #       title: payments-webhook
+  #       type: webhook
+  #       endpointSecretRef:
+  #         name: alert-target-secrets
+  #         key: PAYMENTS_URL
+  #       skipTlsCheck: false          # Optional
+  #       customHeaders:              # Optional; webhook only
+  #         X-Team: payments
+  #     - id: 01K9QQ9QC51KD43TE4HTJ4MW1E
+  #       title: ops-alertmanager
+  #       type: alertManager
+  #       endpointSecretRef:
+  #         name: alert-target-secrets
+  #         key: ALERTMANAGER_URL
+  #       usernameSecretRef:          # Optional with passwordSecretRef
+  #         name: alert-target-secrets
+  #         key: ALERTMANAGER_USERNAME
+  #       passwordSecretRef:
+  #         name: alert-target-secrets
+  #         key: ALERTMANAGER_PASSWORD
+
+  ## ALERTS
+  ## Set enabled: true and list alerts under items. Each entry needs exactly
+  ## one source: json (complete exported alert JSON) or configMap (exact name
+  ## of an existing ConfigMap with one JSON entry in data). The data key can
+  ## have any name. Optional item name overrides the JSON title; otherwise
+  ## the JSON title is used. Keep the alert id in JSON when renaming.
+  ## An alert may omit id; the Job then matches an existing alert by unique
+  ## title. Target IDs in the JSON targets list must be valid target ULIDs.
+  ## Targets defined in parseable.targets are applied before alerts.
+  ## Every configMap item needs its namespace, including the Helm release
+  ## namespace. The chart creates a ConfigMap for each inline JSON item.
+  ## The Job validates every entry before changing Parseable. Alerts absent
+  ## from items are deleted, including UI-created ones. Set items: [] to
+  ## delete all alerts; enabled: false leaves them unchanged.
+  ## Run helm upgrade after changing values or an external ConfigMap.
+  ## The Helm installer must be allowed to create a read-only Role and
+  ## RoleBinding in each referenced namespace.
+  ##
+  # alerts:
+  #   enabled: true
+  #   items:
+  #     - name: Payment failures  # Optional: overrides JSON title
+  #       json: |
+  #         {"title": []}
+  #     - name: Order failures   # Optional: overrides JSON title
+  #       configMap: orders-alert
+  #       namespace: parseable
+  #     - configMap: operations-alert
+  #       namespace: monitoring
 
   ## ServiceMonitor for this Parseable deployment. Read more on ServiceMonitor
   ## here: https://prometheus-operator.dev/docs/api-reference/api/#monitoring.coreos.com/v1.ServiceMonitor
