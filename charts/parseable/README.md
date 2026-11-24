@@ -20,6 +20,32 @@ overlays/
   enterprise.yaml   adds prism; layer on top of a store overlay
 ```
 
+## Upgrading to 3.2.7
+
+Chart 3.2.7 contains a breaking change for installations that manage dataset
+retention through `parseable.datasets`:
+
+- `retention.durationDays` was renamed to `retention.duration`.
+- `retention.action` is now required and its only supported value is `delete`.
+
+Update every configured retention rule before upgrading. Helm schema validation
+rejects the old field and rejects a retention object without `action`.
+
+```yaml
+# Before 3.2.7
+retention:
+  durationDays: 30d
+
+# 3.2.7 and newer
+retention:
+  duration: 30d
+  action: delete
+```
+
+The same shape is required when removing a rule: set `duration` to `0d` or an
+empty string and retain `action: delete`. Installations that do not configure
+`parseable.datasets.items[].retention` are unaffected by this values migration.
+
 ## Standalone (single pod, local-store)
 
 For standalone, `standalone.unified.persistence.staging.enabled=true` creates a
@@ -213,6 +239,79 @@ For existing deployments, keep the legacy settings during an image-only upgrade.
 For a newer image, remove `signature` to apply a combined JSON through the API
 Job, or remove the entire `license` block to use the built-in default.
 
+## Resources as code
+
+Datasets, API keys, dashboards, alert targets, and alerts can be reconciled on
+install and upgrade. Each resource section follows the same lifecycle rules:
+
+- Omit the section or set `enabled: false` to leave server resources unchanged.
+- Set `enabled: true` and provide `items`; the list becomes the complete desired
+  set, not a partial list.
+- An empty `items: []` requests deletion or revocation of every managed resource
+  of that type. Resources created through the UI can also be removed.
+
+Review the desired lists carefully before upgrading a release. Datasets are
+reconciled before API keys, dashboards, targets, and alerts; targets are applied
+before alerts and obsolete targets are removed after alert reconciliation.
+
+## Datasets
+
+Set `parseable.datasets.enabled: true` and provide the complete dataset list.
+Every item requires `name`, `telemetryType`, and `logSource`. OpenTelemetry
+sources must match their telemetry type: `otel-logs`/`logs`,
+`otel-metrics`/`metrics`, or `otel-traces`/`traces`. Dataset names, telemetry
+types, and log sources cannot be changed in place. Renaming a dataset creates a
+new one and deletes the old dataset, including its data.
+
+```yaml
+parseable:
+  datasets:
+    enabled: true
+    items:
+      - name: payment-traces
+        telemetryType: traces
+        logSource: otel-traces
+        tags: [agent-observability]
+        retention:
+          duration: 30d
+          action: delete
+        smartCache:
+          size: 10Gi
+```
+
+Retention duration must be `1d` through `3650d`; use `0d` or `""` to remove
+the rule. `action` is required whenever `retention` is present and only `delete`
+is supported. Smart Cache is Enterprise-only, has a 10 GiB minimum, and can be
+removed with `0Gi` or `""`. Ensure the querier has enough hot-tier capacity.
+The `agent-observability` tag requires a traces/`otel-traces` dataset.
+
+## API keys
+
+Set `parseable.apiKeys.enabled: true` and provide the complete key list. Each
+item requires a unique `name` and an `apiKeyType` of `ingestor` or `query`.
+Omit `secretKeyRef` to let Parseable generate a value for a new key; the value
+is printed once in Job output and may therefore be retained by CI logs. Save it
+securely. To supply a key, store an RFC 4122 UUID v4 in a Secret in the release
+namespace and reference its field. Never put key values directly in values.
+
+```yaml
+parseable:
+  apiKeys:
+    enabled: true
+    items:
+      - name: payment-ingest
+        apiKeyType: ingestor
+        secretKeyRef:
+          name: parseable-api-keys
+          key: PAYMENT_KEY
+      - name: payment-query
+        apiKeyType: query
+```
+
+Changing `apiKeyType` requires revoking and recreating the key. With
+`enabled: true`, keys absent from `items` are revoked; `items: []` revokes all
+keys.
+
 ## Dashboards from values or ConfigMaps
 
 Set `parseable.dashboards.enabled: true` and list dashboards under `items`.
@@ -297,6 +396,36 @@ the complete desired set: alerts absent from it are deleted, including
 UI-created alerts. Set `items: []` to delete all alerts. Omit `alerts`
 or set `enabled: false` to leave them unchanged. Run `helm upgrade` to apply
 changes to values or referenced ConfigMaps.
+
+## Alert targets
+
+Set `parseable.targets.enabled: true` and provide the complete target list.
+Every item requires a stable 26-character ULID `id`, a unique `title`, a `type`
+of `slack`, `webhook`, or `alertManager`, and an `endpointSecretRef`. Endpoint
+URLs and AlertManager credentials must be stored in Secrets in the release
+namespace.
+
+```yaml
+parseable:
+  targets:
+    enabled: true
+    items:
+      - id: 01K9QQ9QC51KD43TE4HTJ4MW1D
+        title: payments-webhook
+        type: webhook
+        endpointSecretRef:
+          name: alert-target-secrets
+          key: PAYMENTS_URL
+        skipTlsCheck: false
+        customHeaders:
+          X-Team: payments
+```
+
+Webhook targets additionally accept `skipTlsCheck` and `customHeaders`.
+AlertManager targets accept `skipTlsCheck` and require both
+`usernameSecretRef` and `passwordSecretRef` when Basic Auth is used. Slack
+targets accept no additional fields. Target titles cannot be changed in place,
+and replacing an ID is blocked while an alert still uses the old target.
 
 ## Upgrade / Uninstall
 
