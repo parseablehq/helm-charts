@@ -155,15 +155,23 @@
                     "type": "object",
                     "description": "Dataset retention rule. Omit to leave the current rule unchanged.",
                     "required": [
-                      "durationDays"
+                      "duration",
+                      "action"
                     ],
                     "properties": {
-                      "durationDays": {
+                      "duration": {
                         "type": [
                           "string",
                           "integer"
                         ],
                         "description": "Keep data for 1d to 3650d, for example 30d. Use 0d or \"\" to remove retention."
+                      },
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "delete"
+                        ],
+                        "description": "Action taken when the retention duration completes. Only delete is currently supported."
                       }
                     },
                     "additionalProperties": false

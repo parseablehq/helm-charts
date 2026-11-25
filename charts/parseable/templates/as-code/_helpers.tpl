@@ -4,13 +4,13 @@
 {{- if or (eq $duration "") (eq $duration "0d") -}}
 {{- /* An explicit empty value or 0d removes the existing retention rules. */ -}}
 {{- else if not (hasSuffix "d" $duration) -}}
-{{- fail (printf "dataset %s: retention.durationDays must end with 'd' (e.g. 10d)" .name) -}}
+{{- fail (printf "dataset %s: retention.duration must end with 'd' (e.g. 10d)" .name) -}}
 {{- else if not (regexMatch "^[1-9][0-9]*d$" $duration) -}}
-{{- fail (printf "dataset %s: retention.durationDays must be a positive whole number of days (e.g. 10d)" .name) -}}
+{{- fail (printf "dataset %s: retention.duration must be a positive whole number of days (e.g. 10d)" .name) -}}
 {{- else -}}
 {{- $digits := trimSuffix "d" $duration -}}
 {{- if or (gt (len $digits) 4) (gt (atoi $digits) 3650) -}}
-{{- fail (printf "dataset %s: retention.durationDays must be between 1d and 3650d" .name) -}}
+{{- fail (printf "dataset %s: retention.duration must be between 1d and 3650d" .name) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
