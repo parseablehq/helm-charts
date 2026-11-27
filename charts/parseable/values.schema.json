@@ -38,10 +38,10 @@
           }
         },
         "clusterSecret": {
-          "description": "Shared authentication secret for distributed nodes; required for Enterprise, optional for OSS, and unused in standalone mode.",
+          "description": "Enterprise distributed nodes use the cluster.secret key in store.secretName by default. Configure this section to use a separate Secret, or optionally enable it for OSS distributed nodes. Unused in standalone mode.",
           "properties": {
-            "enabled": {"description": "Inject P_CLUSTER_SECRET into distributed nodes when true."},
-            "secretName": {"description": "Name of the existing Kubernetes Secret containing the cluster secret."},
+            "enabled": {"description": "Use a separate cluster Secret when true; Enterprise distributed nodes otherwise use store.secretName."},
+            "secretName": {"description": "Name of the separate Kubernetes Secret containing the cluster secret."},
             "secretKey": {"description": "Field in that Secret containing the shared cluster value."}
           }
         },

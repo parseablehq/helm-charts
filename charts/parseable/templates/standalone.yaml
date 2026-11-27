@@ -107,8 +107,6 @@ spec:
               value: {{ tpl (toString $value) $ | quote }}
             {{- end }}
             # object store credentials + admin user from the store secret
-            - name: P_ADDR
-              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: addr } }
             - name: P_USERNAME
               valueFrom: { secretKeyRef: { name: {{ $secret }}, key: username } }
             - name: P_PASSWORD
