@@ -53,7 +53,7 @@
               "description": "Container image used by Enterprise standalone, ingestor, querier, and Prism pods.",
               "properties": {
                 "repository": {"description": "Enterprise image repository, for example quay.io/parseablehq/parseable-enterprise."},
-                "tag": {"description": "Enterprise image tag. An empty value uses the chart appVersion."},
+                "tag": {"description": "Enterprise image tag. An empty value uses the chart appVersion. The latest tag is accepted in standalone and distributed modes."},
                 "pullPolicy": {"description": "Kubernetes image pull policy, for example Always or IfNotPresent."}
               }
             },

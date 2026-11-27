@@ -154,16 +154,17 @@ Image reference for the readiness-wait init containers.
 {{- end -}}
 {{- end }}
 
-{{/* Enterprise standalone requires a versioned image with P_MODE=all support. */}}
+{{/* Enterprise standalone versioned images require P_MODE=all support from v3.2.8. */}}
 {{- define "parseable.validateEnterpriseStandaloneImage" -}}
 {{- $ent := .Values.parseable.enterprise -}}
 {{- if and (eq .Values.parseable.deploymentMode "standalone") $ent.enabled -}}
   {{- $tag := $ent.image.tag | default .Chart.AppVersion -}}
-  {{- if and (ne $tag "edge") (not (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+$" $tag)) -}}
-    {{- fail (printf "Enterprise standalone requires parseable.enterprise.image.tag v3.2.8 or later; got %q" $tag) -}}
+  {{- $floatingTag := or (eq $tag "edge") (eq $tag "latest") -}}
+  {{- if and (not $floatingTag) (not (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+$" $tag)) -}}
+    {{- fail (printf "Enterprise standalone requires parseable.enterprise.image.tag v3.2.8 or later (or edge/latest); got %q" $tag) -}}
   {{- end -}}
-  {{- if and (ne $tag "edge") (not (semverCompare ">=3.2.8" $tag)) -}}
-    {{- fail (printf "Enterprise standalone requires parseable.enterprise.image.tag v3.2.8 or later; got %q" $tag) -}}
+  {{- if and (not $floatingTag) (not (semverCompare ">=3.2.8" $tag)) -}}
+    {{- fail (printf "Enterprise standalone requires parseable.enterprise.image.tag v3.2.8 or later (or edge/latest); got %q" $tag) -}}
   {{- end -}}
 {{- end -}}
 {{- end }}
@@ -212,8 +213,9 @@ Image reference for the readiness-wait init containers.
     {{- fail "parseable.enterprise.license.mountPath is only used with a legacy signature" -}}
   {{- end -}}
   {{- if not $hasSignature -}}
-    {{- if and (not (and (eq .Values.parseable.deploymentMode "standalone") (eq $tag "edge"))) (not (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+].*)?$" $tag)) -}}
-      {{- fail "Cannot verify Enterprise image version for license-free startup: use a versioned image tag (v3.2.7 or newer), or configure a legacy license with signature" -}}
+    {{- $allowFloatingTag := or (eq $tag "latest") (and (eq .Values.parseable.deploymentMode "standalone") (eq $tag "edge")) -}}
+    {{- if and (not $allowFloatingTag) (not (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+].*)?$" $tag)) -}}
+      {{- fail "Cannot verify Enterprise image version for license-free startup: use a versioned image tag (v3.2.7 or newer), latest, or configure a legacy license with signature" -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}

@@ -108,7 +108,8 @@ parseable:
   ## Enterprise edition
   ## -----------------------------------------------------------------------
   ## Flip `enabled: true` to run Parseable Enterprise instead of OSS. Requires
-  ## image v3.2.8+ for standalone. Distributed mode also deploys Prism.
+  ## a versioned image v3.2.8+ for standalone; edge/latest are accepted.
+  ## Distributed mode also deploys Prism.
   enterprise:
     enabled: false
 
