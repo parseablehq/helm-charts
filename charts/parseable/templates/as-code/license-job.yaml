@@ -1,4 +1,4 @@
-{{- if and (eq .Values.parseable.deploymentMode "distributed") .Values.parseable.enterprise.enabled (not (empty .Values.parseable.enterprise.license.secretName)) (not (empty .Values.parseable.enterprise.license.dataKey)) (empty .Values.parseable.enterprise.license.signature.source) (empty .Values.parseable.enterprise.license.signature.key) (empty .Values.parseable.enterprise.license.signature.base64) }}
+{{- if and .Values.parseable.enterprise.enabled (not (empty .Values.parseable.enterprise.license.secretName)) (not (empty .Values.parseable.enterprise.license.dataKey)) (empty .Values.parseable.enterprise.license.signature.source) (empty .Values.parseable.enterprise.license.signature.key) (empty .Values.parseable.enterprise.license.signature.base64) }}
 {{- $p := .Values.parseable }}
 {{- $license := $p.enterprise.license }}
 {{- $fullname := include "parseable.fullname" . }}
@@ -76,7 +76,11 @@ spec:
               echo "Provided license installed"
           env:
             - name: PARSEABLE_URL
+              {{- if eq $p.deploymentMode "standalone" }}
+              value: {{ printf "http://%s-standalone-service.%s:%v" $fullname .Release.Namespace $p.standalone.unified.service.port | quote }}
+              {{- else }}
               value: {{ printf "http://%s-prism-service.%s:%v" $fullname .Release.Namespace $p.distributed.prism.service.port | quote }}
+              {{- end }}
             - name: P_USERNAME
               valueFrom:
                 secretKeyRef:

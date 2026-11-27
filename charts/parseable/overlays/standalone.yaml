@@ -1,5 +1,5 @@
 # Parseable standalone: a single all-in-one pod on local-store.
-# Simplest way to run Parseable; does not scale horizontally (OSS only).
+# Simplest way to run Parseable; does not scale horizontally (OSS or Enterprise).
 parseable:
   deploymentMode: standalone
   store:

@@ -92,6 +92,29 @@ kubectl -n parseable create secret generic parseable-env-secret \
 helm install parseable ./ -n parseable -f overlays/standalone.yaml
 ```
 
+For Enterprise standalone on `v3.2.8` or newer, add these values to the
+standalone overlay. Keep `parseable.image` for OSS; the Enterprise image belongs
+under `parseable.enterprise.image`.
+
+```yaml
+parseable:
+  deploymentMode: standalone
+  enterprise:
+    enabled: true
+    image:
+      repository: quay.io/parseablehq/parseable-enterprise
+      tag: v3.2.8
+      pullPolicy: IfNotPresent
+  store:
+    type: local-store
+    secretName: parseable-env-secret
+```
+
+The built-in license is used when `enterprise.license` is empty. To install a
+provided license JSON, set `enterprise.license.secretName` and `dataKey` as
+described below. Enterprise standalone does not support legacy mounted license
+files or signatures.
+
 ### Upgrading an existing standalone installation
 
 New installations are not affected. If standalone Parseable was installed with
@@ -208,10 +231,11 @@ kubectl -n parseable create secret generic parseable-env-secret \
 helm install parseable ./ -n parseable -f overlays/azure.yaml
 ```
 
-## Enterprise (adds prism)
+## Enterprise distributed (adds prism)
 
-Stack `overlays/enterprise.yaml` on top of a store overlay. The chart's default
-Enterprise image still requires the legacy license Secret:
+Stack `overlays/enterprise.yaml` on top of an object-store overlay. The chart's
+default Enterprise image uses the built-in license. For a release older than
+`v3.2.7`, provide a legacy license Secret:
 
 ```sh
 kubectl -n parseable create secret generic parseable-license \
@@ -253,7 +277,7 @@ parseable:
       secretName: parseable-license
       dataKey: license.json
 ```
-Images older than `v3.2.7` require this legacy configuration.
+Images older than `v3.2.7` require the legacy license and signature settings.
 
 The chart applies the provided file after the deployment starts. Enterprise
 nodes load the license from object storage. The file must be a single JSON

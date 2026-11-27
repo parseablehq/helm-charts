@@ -7,10 +7,10 @@
       "description": "Configuration for the Parseable Helm release.",
       "properties": {
         "deploymentMode": {
-          "description": "standalone runs one OSS pod; distributed runs separate ingestor and querier pods and is required for Enterprise."
+          "description": "standalone runs one OSS or Enterprise pod; distributed runs separate ingestor and querier pods."
         },
         "image": {
-          "description": "OSS container image used by standalone and distributed ingestor/querier pods when Enterprise is disabled.",
+          "description": "OSS container image used when Enterprise is disabled.",
           "properties": {
             "repository": {"description": "OSS image repository, for example quay.io/parseablehq/parseable."},
             "tag": {"description": "OSS image tag. An empty value uses the chart appVersion."},
@@ -46,11 +46,11 @@
           }
         },
         "enterprise": {
-          "description": "Enterprise edition settings. Enable only with deploymentMode: distributed.",
+          "description": "Enterprise edition settings for standalone or distributed deployment.",
           "properties": {
-            "enabled": {"description": "Use the Enterprise image and deploy Prism when true."},
+            "enabled": {"description": "Use the Enterprise image when true; distributed mode also deploys Prism."},
             "image": {
-              "description": "Container image used by Enterprise ingestor, querier, and Prism pods.",
+              "description": "Container image used by Enterprise standalone, ingestor, querier, and Prism pods.",
               "properties": {
                 "repository": {"description": "Enterprise image repository, for example quay.io/parseablehq/parseable-enterprise."},
                 "tag": {"description": "Enterprise image tag. An empty value uses the chart appVersion."},
@@ -58,7 +58,7 @@
               }
             },
             "license": {
-              "description": "Omit for the built-in 50 GB license (v3.2.7+); set secretName and dataKey for the license API Job; add signature for legacy mounted files.",
+              "description": "Omit for the built-in 50 GB license (v3.2.7+); set secretName and dataKey for the license API Job. Legacy mounted files are supported only in distributed mode.",
               "properties": {
                 "secretName": {"description": "Existing Secret containing the combined license JSON or legacy license files. Required whenever license is configured."},
                 "mountPath": {"description": "Directory where the license files are mounted read-only inside each Enterprise pod."},
