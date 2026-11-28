@@ -1,6 +1,6 @@
-# yaml-language-server: $schema=../charts/parseable/values.schema.json
+# yaml-language-server: $schema=../values.schema.json
 # OSS distributed: separate ingestor and querier pods using S3-compatible storage.
-# Create parseable-env-secret with addr, username, password, and the S3 credentials.
+# Create parseable-env-secret with username, password, and the S3 credentials.
 # Replace <storage-class> with the desired StorageClass for the ingestor PVCs.
 
 parseable:
