@@ -179,20 +179,18 @@ spec:
             {{- end }}
             - name: P_QUERIER_ENDPOINT
               value: "$(HOSTNAME).{{ $fullname }}-querier-headless.{{ .Release.Namespace }}.svc.cluster.local:8000"
-            {{- if $p.clusterSecret.enabled }}
+            {{- if or $p.clusterSecret.enabled $ent.enabled }}
             - name: P_CLUSTER_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ $p.clusterSecret.secretName }}
-                  key: {{ $p.clusterSecret.secretKey }}
+                  name: {{ ternary $p.clusterSecret.secretName $secret $p.clusterSecret.enabled }}
+                  key: {{ ternary $p.clusterSecret.secretKey "cluster.secret" $p.clusterSecret.enabled }}
             {{- end }}
             {{- range $key, $value := $node.env }}
             - name: {{ $key }}
               value: {{ tpl (toString $value) $ | quote }}
             {{- end }}
             # object store credentials + admin user from the store secret
-            - name: P_ADDR
-              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: addr } }
             - name: P_USERNAME
               valueFrom: { secretKeyRef: { name: {{ $secret }}, key: username } }
             - name: P_PASSWORD

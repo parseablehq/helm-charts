@@ -1,7 +1,7 @@
-# yaml-language-server: $schema=../charts/parseable/values.schema.json
+# yaml-language-server: $schema=../values.schema.json
 # Enterprise distributed with the built-in 50 GB license (image v3.2.7+).
-# Create parseable-env-secret with addr, username, password, and the S3 credentials.
-# Create parseable-cluster-secret with the cluster-secret key.
+# Create parseable-env-secret with username, password, and the S3 credentials.
+# Add a cluster.secret key to parseable-env-secret (for example, openssl rand -hex 8).
 # Replace <storage-class> with the desired StorageClass for the ingestor, querier, and prism PVCs.
 
 parseable:
@@ -10,11 +10,6 @@ parseable:
   store:
     type: s3-store
     secretName: parseable-env-secret
-
-  clusterSecret:
-    enabled: true
-    secretName: parseable-cluster-secret
-    secretKey: cluster-secret
 
   enterprise:
     enabled: true

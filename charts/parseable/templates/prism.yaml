@@ -1,7 +1,4 @@
 {{- if and (eq .Values.parseable.deploymentMode "distributed") .Values.parseable.enterprise.enabled }}
-{{- if not .Values.parseable.clusterSecret.enabled }}
-{{- fail "Enterprise deployments require parseable.clusterSecret.enabled=true and a pre-existing cluster Secret" }}
-{{- end }}
 {{- $p := .Values.parseable }}
 {{- $ent := $p.enterprise }}
 {{- include "parseable.validateEnterpriseLicense" . }}
@@ -146,20 +143,16 @@ spec:
               value: "/parseable/staging"
             - name: P_PROMQL_RESULTS_CACHE_DIR
               value: "/parseable/promql-cache"
-            {{- if $p.clusterSecret.enabled }}
             - name: P_CLUSTER_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ $p.clusterSecret.secretName }}
-                  key: {{ $p.clusterSecret.secretKey }}
-            {{- end }}
+                  name: {{ ternary $p.clusterSecret.secretName $secret $p.clusterSecret.enabled }}
+                  key: {{ ternary $p.clusterSecret.secretKey "cluster.secret" $p.clusterSecret.enabled }}
             {{- range $key, $value := $node.env }}
             - name: {{ $key }}
               value: {{ tpl (toString $value) $ | quote }}
             {{- end }}
             # object store credentials + admin user from the store secret
-            - name: P_ADDR
-              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: addr } }
             - name: P_USERNAME
               valueFrom: { secretKeyRef: { name: {{ $secret }}, key: username } }
             - name: P_PASSWORD

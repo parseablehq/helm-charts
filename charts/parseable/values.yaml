@@ -6,7 +6,7 @@
 ## the node type.
 ##
 ## Node types map 1:1 to Parseable's P_MODE values and are grouped by mode:
-##   standalone.unified   -> P_MODE=all    (OSS only, single all-in-one pod)
+##   standalone.unified   -> P_MODE=all    (OSS + Enterprise, single all-in-one pod)
 ##   distributed.ingestor -> P_MODE=ingest (OSS + Enterprise)
 ##   distributed.querier  -> P_MODE=query  (OSS + Enterprise)
 ##   distributed.prism    -> P_MODE=prism  (Enterprise only, cluster coordinator)
@@ -24,7 +24,7 @@ parseable:
   ## deploymentMode: standalone | distributed
   ## standalone  - a single all-in-one pod (the `standalone.unified` section).
   ##               Simplest way to run Parseable, does not scale horizontally.
-  ##               OSS only.
+  ##               Supports OSS and Enterprise.
   ## distributed - separate ingestor + querier pods (the `distributed.ingestor`
   ##               / `distributed.querier` sections), plus `distributed.prism`
   ##               when `enterprise.enabled` is true.
@@ -57,7 +57,6 @@ parseable:
     ##
     ## local-store:
     ##   kubectl create secret generic parseable-env-secret \
-    ##     --from-literal=addr=0.0.0.0:8000 \
     ##     --from-literal=username=admin \
     ##     --from-literal=password=admin
     ##
@@ -94,10 +93,10 @@ parseable:
       secretKey: key.json
       mountPath: /var/secrets/google
 
-  ## Shared secret used to authenticate intra-cluster requests between nodes.
-  ## Required for Enterprise distributed deployments, optional for OSS
-  ## distributed deployments, and not used in standalone mode. When enabled,
-  ## P_CLUSTER_SECRET is injected into every distributed node from this secret.
+  ## By default, Enterprise distributed nodes read P_CLUSTER_SECRET from the
+  ## cluster.secret key in store.secretName. Set enabled=true to use a separate
+  ## Secret instead. OSS distributed nodes only use a cluster secret when enabled.
+  ## Standalone does not use a cluster secret.
   ##   kubectl create secret generic parseable-cluster-secret \
   ##     --from-literal=cluster-secret=<16-char-alphanumeric-string>
   clusterSecret:
@@ -109,8 +108,8 @@ parseable:
   ## Enterprise edition
   ## -----------------------------------------------------------------------
   ## Flip `enabled: true` to run Parseable Enterprise instead of OSS. Requires
-  ## deploymentMode: distributed. Unlocks the `distributed.prism` node type,
-  ## plus license validation and audit logging.
+  ## a versioned image v3.2.8+ for standalone; edge/latest are accepted.
+  ## Distributed mode also deploys Prism.
   enterprise:
     enabled: false
 
@@ -125,8 +124,8 @@ parseable:
     ## License is an optional configuration for Enterprise deployments.
     ## - If no license fields provided: use the built-in trial license (image v3.2.7+).
     ## - If secretName + dataKey are provided: install the license v3.
-    ## - If secretName + dataKey + signature: mount legacy license files on every Enterprise pod; no license Job runs.
-    ## Parseable releases older than v3.2.7 require the legacy signature configuration.
+    ## - Distributed mode only: secretName + dataKey + signature mounts legacy license files; no license Job runs.
+    ## Enterprise standalone does not support legacy license files. Parseable releases older than v3.2.7 require them.
     license:
       secretName: ""
       mountPath: "" # optional; defaults to /tmp/license for legacy files
@@ -396,7 +395,7 @@ parseable:
         timeoutSeconds: 5
 
     ## prism (Enterprise only) - cluster coordinator, fronts the querier fleet.
-    ## Deployed automatically whenever enterprise.enabled is true.
+    ## Deployed automatically for Enterprise distributed deployments.
     prism:
       replicas: 1
       env:

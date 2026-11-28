@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=../values.schema.json
+# Enterprise standalone on local-store with the built-in license (image v3.2.8+).
+# Create parseable-env-secret in the release namespace with username and password.
+# Replace <storage-class> with the desired StorageClass for the data and staging PVCs.
+
+parseable:
+  deploymentMode: standalone
+
+  enterprise:
+    enabled: true
+    image:
+      repository: quay.io/parseablehq/parseable-enterprise
+      tag: "v3.2.8" # Must be v3.2.8 or later
+      pullPolicy: IfNotPresent
+
+  store:
+    type: local-store
+    secretName: parseable-env-secret
+
+  standalone:
+    unified:
+      env:
+        RUST_LOG: warn
+      resources:
+        requests:
+          cpu: 250m
+          memory: 1Gi
+        limits:
+          cpu: 500m
+          memory: 4Gi
+      persistence:
+        staging:
+          enabled: true
+          storageClass: <storage-class>
+          accessMode: ReadWriteOnce
+          size: 5Gi
+        data:
+          enabled: true
+          storageClass: <storage-class>
+          accessMode: ReadWriteOnce
+          size: 5Gi

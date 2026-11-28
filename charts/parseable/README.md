@@ -85,12 +85,34 @@ With S3, GCS, or Azure Blob storage, no `/parseable/data` volume is created.
 kubectl create namespace parseable
 
 kubectl -n parseable create secret generic parseable-env-secret \
-  --from-literal=addr=0.0.0.0:8000 \
   --from-literal=username=admin \
   --from-literal=password=admin
 
 helm install parseable ./ -n parseable -f overlays/standalone.yaml
 ```
+
+For Enterprise standalone on `v3.2.8` or newer, add these values to the
+standalone overlay. Keep `parseable.image` for OSS; the Enterprise image belongs
+under `parseable.enterprise.image`.
+
+```yaml
+parseable:
+  deploymentMode: standalone
+  enterprise:
+    enabled: true
+    image:
+      repository: quay.io/parseablehq/parseable-enterprise
+      tag: v3.2.8
+      pullPolicy: IfNotPresent
+  store:
+    type: local-store
+    secretName: parseable-env-secret
+```
+
+The built-in license is used when `enterprise.license` is empty. To install a
+provided license JSON, set `enterprise.license.secretName` and `dataKey` as
+described below. Enterprise standalone does not support legacy mounted license
+files or signatures.
 
 ### Upgrading an existing standalone installation
 
@@ -172,7 +194,6 @@ kubectl create namespace parseable
 
 ```sh
 kubectl -n parseable create secret generic parseable-env-secret \
-  --from-literal=addr=0.0.0.0:8000 \
   --from-literal=username=admin --from-literal=password=admin \
   --from-literal=s3.url=<endpoint> \
   --from-literal=s3.access.key=<key> --from-literal=s3.secret.key=<secret> \
@@ -185,7 +206,6 @@ helm install parseable ./ -n parseable -f overlays/aws.yaml
 
 ```sh
 kubectl -n parseable create secret generic parseable-env-secret \
-  --from-literal=addr=0.0.0.0:8000 \
   --from-literal=username=admin --from-literal=password=admin \
   --from-literal=gcs.url=<url> --from-literal=gcs.bucket=<bucket>
 
@@ -199,7 +219,6 @@ helm install parseable ./ -n parseable -f overlays/gcp.yaml
 
 ```sh
 kubectl -n parseable create secret generic parseable-env-secret \
-  --from-literal=addr=0.0.0.0:8000 \
   --from-literal=username=admin --from-literal=password=admin \
   --from-literal=azr.access_key=<key> --from-literal=azr.account=<account> \
   --from-literal=azr.container=<container> \
@@ -208,10 +227,16 @@ kubectl -n parseable create secret generic parseable-env-secret \
 helm install parseable ./ -n parseable -f overlays/azure.yaml
 ```
 
-## Enterprise (adds prism)
+## Enterprise distributed (adds prism)
 
-Stack `overlays/enterprise.yaml` on top of a store overlay. The chart's default
-Enterprise image still requires the legacy license Secret:
+Stack `overlays/enterprise.yaml` on top of an object-store overlay. The chart's
+default Enterprise image uses the built-in license. The overlay keeps its
+separate cluster Secret for existing installations. For custom Enterprise
+values without `clusterSecret.enabled: true`, add a `cluster.secret` key to the
+store Secret instead (for example,
+`--from-literal=cluster.secret="$(openssl rand -hex 8)"`). All Enterprise
+distributed nodes then read it from `store.secretName`. For a release older
+than `v3.2.7`, provide a legacy license Secret:
 
 ```sh
 kubectl -n parseable create secret generic parseable-license \
@@ -253,7 +278,7 @@ parseable:
       secretName: parseable-license
       dataKey: license.json
 ```
-Images older than `v3.2.7` require this legacy configuration.
+Images older than `v3.2.7` require the legacy license and signature settings.
 
 The chart applies the provided file after the deployment starts. Enterprise
 nodes load the license from object storage. The file must be a single JSON

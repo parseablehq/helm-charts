@@ -1,6 +1,6 @@
-# yaml-language-server: $schema=../charts/parseable/values.schema.json
+# yaml-language-server: $schema=../values.schema.json
 # OSS standalone: one pod with data and staging stored on PVCs.
-# Create parseable-env-secret in the release namespace with addr, username, and password. 
+# Create parseable-env-secret in the release namespace with username and password.
 # Replace <storage-class> with the desired StorageClass.
 
 parseable:

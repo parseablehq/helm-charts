@@ -1,8 +1,9 @@
 {{- if eq .Values.parseable.deploymentMode "standalone" }}
-{{- if .Values.parseable.enterprise.enabled }}
-{{- fail "enterprise.enabled requires deploymentMode: distributed (standalone runs P_MODE=all, which Enterprise does not support)" }}
-{{- end }}
 {{- $p := .Values.parseable }}
+{{- $ent := $p.enterprise }}
+{{- include "parseable.validateEnterpriseValues" . }}
+{{- include "parseable.validateEnterpriseStandaloneImage" . }}
+{{- include "parseable.validateEnterpriseLicense" . }}
 {{- $node := $p.standalone.unified }}
 {{- $store := $p.store }}
 {{- $secret := $store.secretName }}
@@ -11,7 +12,10 @@
 {{- if and $local $node.persistence.staging.enabled (not $node.persistence.data.enabled) }}
 {{- fail "standalone local-store does not support persistence.staging.enabled=true when persistence.data.enabled=false; disable staging persistence as well or enable data persistence" }}
 {{- end }}
-{{- $image := printf "%s:%s" $p.image.repository ($p.image.tag | default .Chart.AppVersion) }}
+{{- $image := $ent.enabled | ternary (printf "%s:%s" $ent.image.repository ($ent.image.tag | default .Chart.AppVersion)) (printf "%s:%s" $p.image.repository ($p.image.tag | default .Chart.AppVersion)) }}
+{{- $pullPolicy := $ent.enabled | ternary $ent.image.pullPolicy $p.image.pullPolicy }}
+{{- $pullSecrets := $ent.enabled | ternary $ent.imagePullSecrets $p.imagePullSecrets }}
+{{- $binary := $ent.enabled | ternary "/usr/bin/parseable-enterprise" "/usr/bin/parseable" }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -65,7 +69,7 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.parseable.com/type: standalone
     spec:
-      {{- with $p.imagePullSecrets }}
+      {{- with $pullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -74,15 +78,17 @@ spec:
       priorityClassName: {{ . | quote }}
       {{- end }}
       terminationGracePeriodSeconds: {{ $node.terminationGracePeriodSeconds }}
+      {{- if not $ent.enabled }}
       securityContext:
         {{- toYaml $p.podSecurityContext | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml $p.securityContext | nindent 12 }}
           image: "{{ $image }}"
-          imagePullPolicy: {{ $p.image.pullPolicy }}
-          args: [ "/usr/bin/parseable", {{ $store.type | quote }} ]
+          imagePullPolicy: {{ $pullPolicy }}
+          args: [ {{ $binary | quote }}, {{ $store.type | quote }} ]
           env:
             - name: HOSTNAME
               valueFrom:
@@ -101,8 +107,6 @@ spec:
               value: {{ tpl (toString $value) $ | quote }}
             {{- end }}
             # object store credentials + admin user from the store secret
-            - name: P_ADDR
-              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: addr } }
             - name: P_USERNAME
               valueFrom: { secretKeyRef: { name: {{ $secret }}, key: username } }
             - name: P_PASSWORD

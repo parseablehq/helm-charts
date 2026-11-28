@@ -140,14 +140,46 @@ Image reference for the readiness-wait init containers.
 {{- printf "%s:%s" $w.repository (toString $w.tag) -}}
 {{- end }}
 
+{{/* Reject Enterprise settings placed under OSS-only values. */}}
+{{- define "parseable.validateEnterpriseValues" -}}
+{{- $p := .Values.parseable -}}
+{{- if hasKey $p "license" -}}
+  {{- fail "parseable.license is not a chart value; set parseable.enterprise.enabled=true and use parseable.enterprise.license instead" -}}
+{{- end -}}
+{{- if and (not $p.enterprise.enabled) (or (not (empty $p.enterprise.license.secretName)) (not (empty $p.enterprise.license.dataKey))) -}}
+  {{- fail "parseable.enterprise.license requires parseable.enterprise.enabled=true" -}}
+{{- end -}}
+{{- if and (not $p.enterprise.enabled) (regexMatch "(^|/)parseable-enterprise$" $p.image.repository) -}}
+  {{- fail "parseable.image points to an Enterprise image while parseable.enterprise.enabled is false; set parseable.enterprise.enabled=true and use parseable.enterprise.image" -}}
+{{- end -}}
+{{- end }}
+
+{{/* Enterprise standalone versioned images require P_MODE=all support from v3.2.8. */}}
+{{- define "parseable.validateEnterpriseStandaloneImage" -}}
+{{- $ent := .Values.parseable.enterprise -}}
+{{- if and (eq .Values.parseable.deploymentMode "standalone") $ent.enabled -}}
+  {{- $tag := $ent.image.tag | default .Chart.AppVersion -}}
+  {{- $floatingTag := or (eq $tag "edge") (eq $tag "latest") -}}
+  {{- if and (not $floatingTag) (not (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+$" $tag)) -}}
+    {{- fail (printf "Enterprise standalone requires parseable.enterprise.image.tag v3.2.8 or later (or edge/latest); got %q" $tag) -}}
+  {{- end -}}
+  {{- if and (not $floatingTag) (not (semverCompare ">=3.2.8" $tag)) -}}
+    {{- fail (printf "Enterprise standalone requires parseable.enterprise.image.tag v3.2.8 or later (or edge/latest); got %q" $tag) -}}
+  {{- end -}}
+{{- end -}}
+{{- end }}
+
 {{/* Validate Enterprise license configuration before rendering workloads. */}}
 {{- define "parseable.validateEnterpriseLicense" -}}
 {{- $ent := .Values.parseable.enterprise -}}
-{{- if and (eq .Values.parseable.deploymentMode "distributed") $ent.enabled -}}
+{{- if $ent.enabled -}}
   {{- $license := $ent.license -}}
   {{- $hasSignature := or (not (empty $license.signature.source)) (not (empty $license.signature.key)) (not (empty $license.signature.base64)) -}}
   {{- $hasLicense := or (not (empty $license.secretName)) (not (empty $license.dataKey)) -}}
   {{- $tag := default .Chart.AppVersion $ent.image.tag -}}
+  {{- if and (eq .Values.parseable.deploymentMode "standalone") (or $hasSignature (not (empty $license.mountPath))) -}}
+    {{- fail "Enterprise standalone does not support legacy license files or signatures; use the built-in trial or license.secretName and license.dataKey for the license API Job" -}}
+  {{- end -}}
   {{- if and (not $hasSignature) (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+].*)?$" $tag) (semverCompare "<3.2.7" $tag) -}}
     {{- fail (printf "Enterprise image %s requires a legacy license. Set license.secretName, license.dataKey, license.signature.source=file, and license.signature.key." $tag) -}}
   {{- end -}}
@@ -181,8 +213,9 @@ Image reference for the readiness-wait init containers.
     {{- fail "parseable.enterprise.license.mountPath is only used with a legacy signature" -}}
   {{- end -}}
   {{- if not $hasSignature -}}
-    {{- if not (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+].*)?$" $tag) -}}
-      {{- fail "Cannot verify Enterprise image version for license-free startup: use a versioned image tag (v3.2.7 or newer), or configure a legacy license with signature" -}}
+    {{- $allowFloatingTag := or (eq $tag "latest") (and (eq .Values.parseable.deploymentMode "standalone") (eq $tag "edge")) -}}
+    {{- if and (not $allowFloatingTag) (not (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+].*)?$" $tag)) -}}
+      {{- fail "Cannot verify Enterprise image version for license-free startup: use a versioned image tag (v3.2.7 or newer), latest, or configure a legacy license with signature" -}}
     {{- end -}}
   {{- end -}}
 {{- end -}}
